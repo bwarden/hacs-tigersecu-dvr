@@ -76,7 +76,7 @@ class TigersecuDVR:
         self.coordinator = DataUpdateCoordinator(
             hass,
             _LOGGER,
-            name=f"{DOMAIN} ({host})",
+            name=f"{DOMAIN} ({self.host})",
             # The websocket pushes updates, so we don't need polling.
             update_interval=timedelta(days=365),
             # Initialize with a structure to hold channel states
@@ -88,7 +88,7 @@ class TigersecuDVR:
             },
         )
         self.api = TigersecuDVRAPI(
-            host,
+            self.host,
             self.username,
             self.password,
             session=async_get_clientsession(hass),
