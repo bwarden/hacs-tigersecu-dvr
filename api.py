@@ -4,6 +4,7 @@ import base64
 import logging
 import ssl
 from typing import Awaitable, Callable
+from xml.etree import ElementTree as ET
 
 import aiohttp
 from aiohttp.hdrs import METH_GET
@@ -21,7 +22,7 @@ class TigersecuDVRAPI:
         username: str,
         password: str,
         session: aiohttp.ClientSession,
-        update_callback: Callable[[str], Awaitable[None]] = None,
+        update_callback: Callable[[dict], Awaitable[None]] = None,
     ):
         """Initialize the API."""
         self.host = host
@@ -147,10 +148,7 @@ class TigersecuDVRAPI:
                                         _LOGGER.debug(
                                             "Parsed XML data from event: %s", xml_data_str
                                         )
-                                        if self._update_callback:
-                                            asyncio.create_task(
-                                                self._update_callback(xml_data_str)
-                                            )
+                                        self._process_xml_triggers(xml_data_str)
                 except Exception as e:
                     _LOGGER.error("Error parsing binary event stream: %s", e)
 
@@ -164,3 +162,25 @@ class TigersecuDVRAPI:
                     "Websocket connection closed or errored, breaking listener loop"
                 )
                 break
+
+    def _process_xml_triggers(self, xml_string: str):
+        """Parse XML triggers and dispatch them via the callback."""
+        if not xml_string or not self._update_callback:
+            return
+
+        # The stream sends multiple <Trigger.../> elements concatenated together,
+        # which is not valid XML. We wrap it to create a valid document.
+        try:
+            root = ET.fromstring(f"<root>{xml_string}</root>")
+        except ET.ParseError as e:
+            _LOGGER.error("Error parsing XML trigger data: %s", e)
+            return
+
+        for trigger in root:
+            if trigger.tag == "Trigger" and trigger.attrib:
+                # For SMART events, we need the child elements, so pass the full element.
+                # For others, the attributes dictionary is sufficient.
+                if trigger.get("Event") == "SMART":
+                    asyncio.create_task(self._update_callback(trigger))
+                else:
+                    asyncio.create_task(self._update_callback(trigger.attrib))

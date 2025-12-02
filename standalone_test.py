@@ -28,9 +28,9 @@ import aiohttp
 from api import TigersecuDVRAPI
 
 
-async def on_data_received(xml_data: str):
-    """Callback function to simply print received data."""
-    logging.info("--- XML DATA RECEIVED ---\n%s", xml_data)
+async def on_data_received(trigger_data: dict):
+    """Callback function to simply print received trigger data."""
+    logging.info("--- TRIGGER DATA RECEIVED ---: %s", trigger_data)
 
 async def main():
     """Main function to run the standalone test."""
