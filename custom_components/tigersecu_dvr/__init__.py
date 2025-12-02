@@ -111,7 +111,7 @@ class TigersecuDVR:
         if event_type == "login":
             self.initial_data_received.set()
 
-        current_data = self.coordinator.data.copy()
+        current_data = self.coordinator.data
         updated = False
 
         if event_type == "video_input":
@@ -199,4 +199,4 @@ class TigersecuDVR:
             updated = True
 
         if updated:
-            self.coordinator.async_set_updated_data(current_data)
+            self.coordinator.async_set_updated_data(self.coordinator.data)
