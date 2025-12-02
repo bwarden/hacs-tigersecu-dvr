@@ -55,7 +55,9 @@ class TigersecuDVRAPI:
         )
 
         # DVRs often use self-signed certificates
-        ssl_context = ssl.create_default_context()
+        # Use ssl.SSLContext() instead of ssl.create_default_context() to avoid
+        # blocking I/O calls for loading default certs and paths, which are not needed.
+        ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         ssl_context.check_hostname = False
         ssl_context.verify_mode = ssl.CERT_NONE
 
