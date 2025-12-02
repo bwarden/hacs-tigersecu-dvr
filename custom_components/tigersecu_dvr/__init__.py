@@ -79,14 +79,14 @@ class TigersecuDVR:
             name=f"{DOMAIN} ({self.host})",
             # The websocket pushes updates, so we don't need polling.
             update_interval=timedelta(days=365),
-            # Initialize with a structure to hold channel states
-            data={
-                "channels": {},
-                "disks": {},
-                "network": {},
-                "last_login": None,
-            },
         )
+        # Initialize with a structure to hold channel states
+        self.coordinator.data = {
+            "channels": {},
+            "disks": {},
+            "network": {},
+            "last_login": None,
+        }
         self.api = TigersecuDVRAPI(
             self.host,
             self.username,
