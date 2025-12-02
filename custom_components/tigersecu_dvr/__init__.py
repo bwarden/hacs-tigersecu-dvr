@@ -129,6 +129,10 @@ class TigersecuDVR:
         elif event_type == "motion":
             channel_id = trigger_data.get("channel")
             state = trigger_data.get("state")
+            if channel_id not in current_data["channels"]:
+                _LOGGER.debug("Initializing state for channel %s on motion event", channel_id)
+                current_data["channels"][channel_id] = {"motion_detected": not state, "vloss": False, "record_type": "None"}
+
             if current_data["channels"][channel_id]["motion_detected"] != state:
                 current_data["channels"][channel_id]["motion_detected"] = state
                 updated = True
@@ -136,6 +140,10 @@ class TigersecuDVR:
         elif event_type == "vloss":
             channel_id = trigger_data.get("channel")
             state = trigger_data.get("state")
+            if channel_id not in current_data["channels"]:
+                _LOGGER.debug("Initializing state for channel %s on vloss event", channel_id)
+                current_data["channels"][channel_id] = {"motion_detected": False, "vloss": not state, "record_type": "None"}
+
             if current_data["channels"][channel_id]["vloss"] != state:
                 current_data["channels"][channel_id]["vloss"] = state
                 updated = True
@@ -143,6 +151,10 @@ class TigersecuDVR:
         elif event_type == "record":
             channel_id = trigger_data.get("channel")
             record_type = trigger_data.get("type")
+            if channel_id not in current_data["channels"]:
+                _LOGGER.debug("Initializing state for channel %s on record event", channel_id)
+                current_data["channels"][channel_id] = {"motion_detected": False, "vloss": False, "record_type": "None"}
+
             if current_data["channels"][channel_id]["record_type"] != record_type:
                 current_data["channels"][channel_id]["record_type"] = record_type
                 updated = True
