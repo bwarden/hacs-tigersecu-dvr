@@ -21,10 +21,14 @@ import asyncio
 import logging
 import os
 import signal
+import sys
 
 import aiohttp
 
-# Import the standalone API class
+# Add the component's directory to the path so we can import the api module directly,
+# without triggering the import of Home Assistant modules from __init__.py.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "custom_components/tigersecu_dvr"))
+
 from api import TigersecuDVRAPI
 
 
