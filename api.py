@@ -34,6 +34,17 @@ class TigersecuDVRAPI:
         self._listen_task = None
         self._buffer = b""
         self._boundary = None
+        self.channels = []
+        self._trigger_handlers = {
+            "Motion": self._handle_motion_event,
+            "VLOSS": self._handle_vloss_event,
+            "Disk": self._handle_disk_event,
+            "Record": self._handle_record_event,
+            "Login": self._handle_login_event,
+            "Network": self._handle_network_event,
+            "SMART": self._handle_smart_event,
+            "VideoInput": self._handle_video_input_event,
+        }
 
     async def async_connect(self):
         """Establish and authenticate a persistent websocket connection."""
@@ -179,8 +190,98 @@ class TigersecuDVRAPI:
         for trigger in root:
             if trigger.tag == "Trigger" and trigger.attrib:
                 # For SMART events, we need the child elements, so pass the full element.
-                # For others, the attributes dictionary is sufficient.
-                if trigger.get("Event") == "SMART":
-                    asyncio.create_task(self._update_callback(trigger))
-                else:
-                    asyncio.create_task(self._update_callback(trigger.attrib))
+                self._dispatch_trigger(trigger)
+
+    def _dispatch_trigger(self, trigger: ET.Element):
+        """Dispatch a trigger element to the appropriate handler in the API."""
+        event_type = trigger.get("Event")
+        if not event_type:
+            _LOGGER.debug("Received a trigger with no Event attribute: %s", ET.tostring(trigger))
+            return
+
+        handler = self._trigger_handlers.get(event_type)
+        if handler:
+            handler(trigger)
+        else:
+            _LOGGER.debug("No handler for event type '%s'", event_type)
+
+    def _emit(self, data: dict):
+        """Emit data via the callback."""
+        if self._update_callback:
+            asyncio.create_task(self._update_callback(data))
+
+    def _handle_motion_event(self, trigger: ET.Element):
+        """Handle a motion detection event and emit structured data."""
+        try:
+            motion_mask = int(trigger.get("Value", "0"))
+            for channel_id in self.channels:
+                is_motion = bool(motion_mask & (1 << channel_id))
+                self._emit({"event": "motion", "channel": channel_id, "state": is_motion})
+        except (ValueError, KeyError):
+            _LOGGER.warning("Received invalid Motion event: %s", trigger.attrib)
+
+    def _handle_vloss_event(self, trigger: ET.Element):
+        """Handle a video loss event and emit structured data."""
+        try:
+            vloss_mask = int(trigger.get("Value", "0"))
+            for channel_id in self.channels:
+                is_vloss = bool(vloss_mask & (1 << channel_id))
+                self._emit({"event": "vloss", "channel": channel_id, "state": is_vloss})
+        except (ValueError, KeyError):
+            _LOGGER.warning("Received invalid VLOSS event: %s", trigger.attrib)
+
+    def _handle_disk_event(self, trigger: ET.Element):
+        """Handle a disk status event."""
+        self._emit({"event": "disk", "data": trigger.attrib})
+
+    def _handle_login_event(self, trigger: ET.Element):
+        """Handle a user login event."""
+        self._emit({"event": "login", "data": trigger.attrib})
+
+    def _handle_network_event(self, trigger: ET.Element):
+        """Handle a network status event."""
+        self._emit({"event": "network", "data": trigger.attrib})
+
+    def _handle_smart_event(self, trigger: ET.Element):
+        """Handle a disk SMART status event."""
+        try:
+            disk_id = int(trigger.get("ID"))
+            attributes = {}
+            for attr in trigger:
+                if attr.tag == "Attribute":
+                    attr_id = int(attr.get("ID"))
+                    attributes[attr_id] = attr.attrib
+            self._emit(
+                {
+                    "event": "smart",
+                    "disk_id": disk_id,
+                    "attributes": attributes,
+                }
+            )
+        except (ValueError, KeyError, TypeError):
+            _LOGGER.warning("Received invalid SMART event: %s", trigger.attrib)
+
+    def _handle_record_event(self, trigger: ET.Element):
+        """Handle a record status event."""
+        try:
+            channel_id = int(trigger.get("ID"))
+            record_type = trigger.get("Type")
+            self._emit(
+                {
+                    "event": "record",
+                    "channel": channel_id,
+                    "type": record_type,
+                }
+            )
+        except (ValueError, KeyError):
+            _LOGGER.warning("Received invalid Record event: %s", trigger.attrib)
+
+    def _handle_video_input_event(self, trigger: ET.Element):
+        """Handle a video input discovery event."""
+        try:
+            channel_id = int(trigger.get("CH"))
+            if channel_id not in self.channels:
+                self.channels.append(channel_id)
+            self._emit({"event": "video_input", "data": trigger.attrib})
+        except (ValueError, KeyError):
+            _LOGGER.warning("Received invalid VideoInput event: %s", trigger.attrib)
