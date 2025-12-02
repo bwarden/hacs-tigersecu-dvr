@@ -49,6 +49,12 @@ class TigersecuCamera(CoordinatorEntity[DataUpdateCoordinator], Camera):
         }
 
     @property
+    def available(self) -> bool:
+        """Return True if the entity is available."""
+        # The camera is unavailable if there is video loss.
+        return not self.coordinator.data["channels"][self._channel_id]["vloss"]
+
+    @property
     def is_recording(self) -> bool:
         """Return true if the camera is recording."""
         return self.coordinator.data["channels"][self._channel_id].get("record_type") != "None"
