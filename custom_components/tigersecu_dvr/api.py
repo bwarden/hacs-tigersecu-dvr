@@ -11,6 +11,7 @@ from aiohttp.hdrs import METH_GET
 from multidict import CIMultiDict
 
 _LOGGER = logging.getLogger(__name__)
+MESSAGE_TIMEOUT = 60.0
 
 
 class TigersecuDVRAPI:
@@ -32,6 +33,7 @@ class TigersecuDVRAPI:
         self._update_callback = update_callback
         self._ws = None
         self._listen_task = None
+        self._manager_task = None
         self._buffer = b""
         self._boundary = None
         self.channels = []
@@ -48,6 +50,10 @@ class TigersecuDVRAPI:
 
     async def async_connect(self):
         """Establish and authenticate a persistent websocket connection."""
+        # Start the connection manager task
+        self._manager_task = asyncio.create_task(self._connection_manager())
+
+    async def _connect_internal(self):
         _LOGGER.debug("Connecting to websocket at wss://%s/streaming", self.host)
         url = f"wss://{self.host}/streaming"
         auth_str = base64.b64encode(f"{self.username}:{self.password}".encode()).decode(
@@ -92,18 +98,14 @@ class TigersecuDVRAPI:
                 )
                 await self.async_disconnect()
                 raise ConnectionError("Authentication failed on 'wsev' confirmation")
-
-            _LOGGER.debug("Authentication successful, starting listener")
-            self._listen_task = asyncio.create_task(self._listen())
-
-        except (aiohttp.ClientError, asyncio.TimeoutError) as err:
-            _LOGGER.error("Failed to connect or authenticate with DVR: %s", err)
-            await self.async_disconnect()
-            raise ConnectionError("Failed to connect to DVR") from err
+            
+            _LOGGER.debug("Authentication successful.")
 
     async def async_disconnect(self):
         """Disconnect from the DVR and clean up."""
         _LOGGER.debug("Disconnecting from DVR")
+        if self._manager_task and not self._manager_task.done():
+            self._manager_task.cancel()
         if self._listen_task and not self._listen_task.done():
             self._listen_task.cancel()
             # Wait for the listener task to finish cancelling
@@ -114,13 +116,38 @@ class TigersecuDVRAPI:
         if self._ws and not self._ws.closed:
             await self._ws.close()
 
+    async def _connection_manager(self):
+        """Manages the connection and reconnection logic."""
+        backoff_time = 1
+        while True:
+            try:
+                await self._connect_internal()
+                _LOGGER.info("Successfully connected to DVR.")
+                backoff_time = 1  # Reset backoff on successful connection
+                await self._listen()  # This will run until the connection is lost
+
+            except (aiohttp.ClientError, ConnectionError, asyncio.TimeoutError) as err:
+                _LOGGER.warning("Connection to DVR lost: %s. Reconnecting in %d seconds.", err, backoff_time)
+            except asyncio.CancelledError:
+                _LOGGER.debug("Connection manager cancelled.")
+                break
+            
+            # Clean up before retrying
+            if self._ws and not self._ws.closed:
+                await self._ws.close()
+
+            await asyncio.sleep(backoff_time)
+            backoff_time = min(backoff_time * 2, 60)
+
     async def _listen(self):
         """Listen for incoming messages from the websocket."""
         _LOGGER.debug("Websocket listener started")
         self._buffer = b""
         self._boundary = None
 
-        async for msg in self._ws:
+        while not self._ws.closed:
+            msg = await self._ws.receive(timeout=MESSAGE_TIMEOUT)
+
             # The DVR sends a non-standard multipart stream as binary data.
             if msg.type == aiohttp.WSMsgType.BINARY:
                 self._buffer += msg.data
@@ -176,10 +203,7 @@ class TigersecuDVRAPI:
                 aiohttp.WSMsgType.CLOSED,
                 aiohttp.WSMsgType.ERROR,
             ):
-                _LOGGER.warning(
-                    "Websocket connection closed or errored, breaking listener loop"
-                )
-                break
+                raise ConnectionError(f"Websocket connection closed or errored: {msg.type}")
 
     def _process_xml_triggers(self, xml_string: str):
         """Parse XML triggers and dispatch them via the callback."""
