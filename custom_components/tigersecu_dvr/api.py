@@ -99,7 +99,11 @@ class TigersecuDVRAPI:
                 await self.async_disconnect()
                 raise ConnectionError("Authentication failed on 'wsev' confirmation")
             
-            _LOGGER.debug("Authentication successful.")
+            _LOGGER.debug("Authentication successful in _connect_internal.")
+        finally:
+            # Ensure websocket is closed if an error occurs before successful authentication.
+            if self._ws and not self._ws.closed:
+                await self._ws.close()
 
     async def async_disconnect(self):
         """Disconnect from the DVR and clean up."""
@@ -112,7 +116,7 @@ class TigersecuDVRAPI:
             try:
                 await self._listen_task
             except asyncio.CancelledError:
-                _LOGGER.debug("Listener task successfully cancelled.")
+                _LOGGER.debug("Listener task successfully cancelled during disconnect.")
         if self._ws and not self._ws.closed:
             await self._ws.close()
 
