@@ -1,5 +1,5 @@
 {
   "name": "Tigersecu DVR",
-  "render_readme": true,
-  "iot_class": "local_polling"
+  "homeassistant": "2025.11.3",
+  "hacs": "2.0.5"
 }
