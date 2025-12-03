@@ -44,7 +44,7 @@ class TigersecuCamera(CoordinatorEntity[DataUpdateCoordinator], Camera):
         self._dvr = dvr
         self._channel_id = channel_id
         # The name will be like "Channel 1", "Channel 2", etc.
-        self._attr_name = f"{self._dvr.host} Channel {self._channel_id + 1}"
+        self._attr_name = f"CH{self._channel_id + 1:02d}"
         self._attr_unique_id = f"{self._dvr.entry.entry_id}_channel_{self._channel_id}"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, self._dvr.entry.entry_id)},
