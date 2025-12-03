@@ -2,6 +2,7 @@
 import logging
 
 from homeassistant.components.camera import Camera, CameraEntityFeature
+from homeassistant.components import ffmpeg
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -66,3 +67,17 @@ class TigersecuCamera(CoordinatorEntity[DataUpdateCoordinator], Camera):
     async def stream_source(self) -> str | None:
         """Return the source of the stream."""
         return f"rtsp://{self._dvr.username}:{self._dvr.password}@{self._dvr.host}/main_{self._channel_id}?transport=tcp"
+
+    async def async_camera_image(
+        self, width: int | None = None, height: int | None = None
+    ) -> bytes | None:
+        """Return a still image from the camera."""
+        stream_source = await self.stream_source()
+        if not stream_source:
+            return None
+        return await ffmpeg.async_get_image(
+            self.hass,
+            stream_source,
+            width=width,
+            height=height,
+        )
