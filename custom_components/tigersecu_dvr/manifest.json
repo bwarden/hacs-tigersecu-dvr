@@ -1,12 +1,11 @@
 {
   "domain": "tigersecu_dvr",
   "name": "Tigersecu DVR",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "documentation": "https://github.com/bwarden/hacs-tigersecu-dvr",
   "issue_tracker": "https://github.com/bwarden/hacs-tigersecu-dvr/issues",
   "codeowners": ["@bwarden"],
   "config_flow": true,
   "iot_class": "local_push",
-  "requirements": [],
-  "dependencies": ["ffmpeg"]
+  "requirements": []
 }
