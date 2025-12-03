@@ -39,15 +39,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         raise ConfigEntryNotReady("Did not receive initial data from DVR in time") from err
 
     # Setup platforms now that we have the initial data
-    hass.async_create_task(
-        hass.config_entries.async_forward_entry_setups(entry, ["camera"])
-    )
-    hass.async_create_task(
-        hass.config_entries.async_forward_entry_setups(entry, ["binary_sensor"])
-    )
-    hass.async_create_task(
-        hass.config_entries.async_forward_entry_setups(entry, ["sensor"])
-    )
+    await hass.config_entries.async_forward_entry_setups(entry, ["camera", "binary_sensor", "sensor"])
 
     return True
 
