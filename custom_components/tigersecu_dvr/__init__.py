@@ -35,6 +35,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     try:
         await asyncio.wait_for(dvr.initial_data_received.wait(), timeout=10)
     except asyncio.TimeoutError as err:
+        await dvr.api.async_disconnect()
         raise ConfigEntryNotReady("Did not receive initial data from DVR in time") from err
 
     # Setup platforms now that we have the initial data
