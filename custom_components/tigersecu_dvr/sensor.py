@@ -134,6 +134,7 @@ class SmartAttributeSensor(TigersecuSensorBase):
     """A sensor for a disk SMART attribute."""
 
     _attr_icon = "mdi:information-outline"
+    _attr_entity_registry_enabled_default = False
 
     def __init__(self, dvr: TigersecuDVR, disk_id: int, attr_id: int):
         """Initialize the SMART attribute sensor."""
@@ -154,10 +155,15 @@ class SmartAttributeSensor(TigersecuSensorBase):
         )
 
     @property
-    def native_value(self) -> str | None:
+    def native_value(self) -> int | None:
         """Return the 'Value' of the SMART attribute."""
         if data := self._attribute_data:
-            return data.get("value")
+            value_str = data.get("value")
+            if value_str is not None:
+                try:
+                    return int(value_str)
+                except (ValueError, TypeError):
+                    return None
         return None
 
     @property
