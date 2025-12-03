@@ -32,7 +32,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         raise ConfigEntryNotReady(f"Failed to connect to DVR: {err}") from err
 
     # Wait for the initial data (like camera channels) to be populated
-    await dvr.initial_data_received.wait()
+    try:
+        await asyncio.wait_for(dvr.initial_data_received.wait(), timeout=10)
+    except asyncio.TimeoutError as err:
+        await dvr.api.async_disconnect()
+        raise ConfigEntryNotReady("Did not receive initial data from DVR in time") from err
 
     # Setup platforms now that we have the initial data
     hass.async_create_task(
@@ -107,9 +111,16 @@ class TigersecuDVR:
         if not event_type:
             return
 
-        # The "login" event is a good marker for the end of the initial state dump.
-        if event_type == "login":
+        # A burst of VideoInput events is a good marker for the end of the initial state dump.
+        if event_type == "channels_discovered":
+            _LOGGER.debug("Channels discovered: %s", trigger_data.get("channels"))
+            self.channels = trigger_data.get("channels", [])
+            for channel_id in self.channels:
+                if channel_id not in self.coordinator.data["channels"]:
+                    self.coordinator.data["channels"][channel_id] = {"record_type": "None", "motion_detected": False, "vloss": False}
             self.initial_data_received.set()
+            # We don't need to process this special event further.
+            return
 
         current_data = self.coordinator.data
         updated = False

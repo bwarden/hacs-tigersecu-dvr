@@ -194,10 +194,22 @@ class TigersecuDVRAPI:
             _LOGGER.error("Error parsing XML trigger data: %s", e)
             return
 
+        # A burst of VideoInput events indicates the initial channel discovery.
+        # We can use this to signal that all channels have been found.
+        video_inputs_in_message = [
+            t for t in root if t.tag == "Trigger" and t.get("Event") == "VideoInput"
+        ]
+
+        if len(video_inputs_in_message) > 1:
+            discovered_channels = [int(t.get("CH")) for t in video_inputs_in_message]
+            self._emit({"event": "channels_discovered", "channels": discovered_channels})
+
         for trigger in root:
             if trigger.tag == "Trigger" and trigger.attrib:
                 # For SMART events, we need the child elements, so pass the full element.
                 self._dispatch_trigger(trigger)
+
+
 
     def _dispatch_trigger(self, trigger: ET.Element):
         """Dispatch a trigger element to the appropriate handler in the API."""
