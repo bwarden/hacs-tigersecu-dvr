@@ -1,5 +1,8 @@
 """Config flow for Tigersecu DVR integration."""
+
+import asyncio
 import logging
+from typing import Any
 
 import aiohttp
 import voluptuous as vol
@@ -32,13 +35,11 @@ async def validate_input(hass: HomeAssistant, data: dict) -> None:
         password=data[CONF_PASSWORD],
         session=session,
     )
-    # We use the internal connect method for validation to avoid starting the manager task.
     try:
-        await asyncio.wait_for(api._connect_internal(), timeout=10)
+        # Use the dedicated validation method which connects, authenticates, and disconnects.
+        await api.async_validate_connection()
     except asyncio.TimeoutError as err:
         raise ConnectionError("Connection timed out") from err
-    
-    await api.async_disconnect()
 
 
 class TigersecuDVRConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -46,7 +47,9 @@ class TigersecuDVRConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
-    async def async_step_user(self, user_input=None):
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
         """Handle the initial step."""
         errors = {}
         if user_input is not None:

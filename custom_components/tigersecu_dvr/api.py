@@ -1,4 +1,5 @@
 """API for communicating with a Tigersecu DVR."""
+
 import asyncio
 import base64
 import logging
@@ -53,6 +54,70 @@ class TigersecuDVRAPI:
         # Start the connection manager task
         self._manager_task = asyncio.create_task(self._connection_manager())
 
+    async def async_validate_connection(self):
+        """Validate connection details without starting the full listener."""
+        url = f"wss://{self.host}/streaming"
+        _LOGGER.debug("Validating connection to {%s}", url)
+        auth_str = base64.b64encode(f"{self.username}:{self.password}".encode()).decode(
+            "ascii"
+        )
+        ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+
+        ws = None
+        try:
+            ws = await self._session.ws_connect(
+                url, protocols=("message",), ssl=ssl_context, timeout=10
+            )
+            await ws.send_str(f"Basic {auth_str}")
+            # Wait for the two confirmation messages: "wsev" and "emsg".
+            wsev_response = await ws.receive(timeout=10)
+            wsev_data = wsev_response.data
+            if wsev_response.type == aiohttp.WSMsgType.BINARY:
+                wsev_data = wsev_data.decode("utf-8", errors="ignore")
+
+            if (
+                wsev_response.type
+                not in (
+                    aiohttp.WSMsgType.TEXT,
+                    aiohttp.WSMsgType.BINARY,
+                )
+                or "wsev" not in wsev_data
+            ):
+                raise ConnectionError(
+                    "Authentication failed during validation: 'wsev' confirmation not found"
+                )
+
+            # The second message is "emsg", we just need to receive it.
+            emsg_response = await ws.receive(timeout=10)
+            emsg_data = emsg_response.data
+            if emsg_response.type == aiohttp.WSMsgType.BINARY:
+                emsg_data = emsg_data.decode("utf-8", errors="ignore")
+
+            if "emsg" not in emsg_data:
+                raise ConnectionError(
+                    "Authentication failed during validation: 'emsg' confirmation not found"
+                )
+
+            # The emsg contains the boundary for the multipart stream.
+            boundary_marker = "boundary="
+            boundary_start_index = emsg_data.find(boundary_marker)
+            if boundary_start_index != -1:
+                boundary_start = boundary_start_index + len(boundary_marker)
+                # The boundary is terminated by a newline
+                boundary_end_index = emsg_data.find("\r\n", boundary_start)
+                if boundary_end_index == -1:
+                    boundary_end_index = len(emsg_data)
+            else:
+                raise ConnectionError(
+                    "Authentication failed: boundary not found in 'emsg' confirmation"
+                )
+
+        finally:
+            if ws and not ws.closed:
+                await ws.close()
+
     async def _connect_internal(self):
         _LOGGER.debug("Connecting to websocket at wss://%s/streaming", self.host)
         url = f"wss://{self.host}/streaming"
@@ -67,43 +132,65 @@ class TigersecuDVRAPI:
         ssl_context.check_hostname = False
         ssl_context.verify_mode = ssl.CERT_NONE
 
-        try:
-            # Establish the connection without any authentication headers.
-            self._ws = await self._session.ws_connect(
-                url, protocols=("message",), ssl=ssl_context
-            )
+        # Establish the connection without any authentication headers.
+        self._ws = await self._session.ws_connect(
+            url, protocols=("message",), ssl=ssl_context, timeout=10
+        )
 
-            # Send the authentication string as the first message.
-            _LOGGER.debug("Websocket connected, sending auth string")
-            auth_message = f"Basic {auth_str}"
-            await self._ws.send_str(auth_message)
+        # Send the authentication string as the first message.
+        _LOGGER.debug("Websocket connected, sending auth string")
+        auth_message = f"Basic {auth_str}"
+        await self._ws.send_str(auth_message)
 
-            # Wait for the two confirmation messages from the DVR: "wsev" and "emsg".
-            _LOGGER.debug("Waiting for authentication confirmation messages.")
+        # Wait for the two confirmation messages from the DVR: "wsev" and "emsg".
+        _LOGGER.debug("Waiting for authentication confirmation messages.")
 
-            # First message should be "wsev"
-            wsev_response = await self._ws.receive(timeout=10)
-            wsev_data = wsev_response.data
-            if wsev_response.type == aiohttp.WSMsgType.BINARY:
-                # Decode with errors ignored, as the message may be wrapped in other binary data
-                wsev_data = wsev_data.decode("utf-8", errors="ignore")
+        # First message should be "wsev"
+        wsev_response = await self._ws.receive(timeout=10)
+        wsev_data = wsev_response.data
+        if wsev_response.type == aiohttp.WSMsgType.BINARY:
+            # Decode with errors ignored, as the message may be wrapped in other binary data
+            wsev_data = wsev_data.decode("utf-8", errors="ignore")
 
-            if wsev_response.type not in (
+        if (
+            wsev_response.type
+            not in (
                 aiohttp.WSMsgType.TEXT,
                 aiohttp.WSMsgType.BINARY,
-            ) or "wsev" not in wsev_data:
-                _LOGGER.error(
-                    "Authentication failed: 'wsev' confirmation not found in message. Got: %s",
-                    wsev_response.data,
-                )
-                await self.async_disconnect()
-                raise ConnectionError("Authentication failed on 'wsev' confirmation")
-            
-            _LOGGER.debug("Authentication successful in _connect_internal.")
-        finally:
-            # Ensure websocket is closed if an error occurs before successful authentication.
-            if self._ws and not self._ws.closed:
-                await self._ws.close()
+            )
+            or "wsev" not in wsev_data
+        ):
+            _LOGGER.error(
+                "Authentication failed: 'wsev' confirmation not found in message. Got: %s",
+                wsev_response.data,
+            )
+            raise ConnectionError("Authentication failed on 'wsev' confirmation")
+
+        # Second message is "emsg" and contains the boundary
+        emsg_response = await self._ws.receive(timeout=10)
+        emsg_data = emsg_response.data
+        if emsg_response.type == aiohttp.WSMsgType.BINARY:
+            emsg_data = emsg_data.decode("utf-8", errors="ignore")
+
+        if "emsg" not in emsg_data:
+            raise ConnectionError(
+                "Authentication failed: 'emsg' confirmation not found"
+            )
+
+        boundary_marker = "boundary="
+        boundary_start_index = emsg_data.find(boundary_marker)
+        if boundary_start_index != -1:
+            boundary_start = boundary_start_index + len(boundary_marker)
+            # The boundary is terminated by a newline
+            boundary_end_index = emsg_data.find("\r\n", boundary_start)
+            if boundary_end_index == -1:
+                boundary_end_index = len(emsg_data)
+            self._boundary = emsg_data[boundary_start:boundary_end_index].encode()
+            _LOGGER.debug("Found multipart boundary: %s", self._boundary)
+        else:
+            raise ConnectionError("Boundary not found in 'emsg' confirmation message")
+
+        _LOGGER.debug("Authentication successful in _connect_internal.")
 
     async def async_disconnect(self):
         """Disconnect from the DVR and clean up."""
@@ -131,11 +218,15 @@ class TigersecuDVRAPI:
                 await self._listen()  # This will run until the connection is lost
 
             except (aiohttp.ClientError, ConnectionError, asyncio.TimeoutError) as err:
-                _LOGGER.warning("Connection to DVR lost: %s. Reconnecting in %d seconds.", err, backoff_time)
+                _LOGGER.warning(
+                    "Connection to DVR lost: %s. Reconnecting in %d seconds.",
+                    err,
+                    backoff_time,
+                )
             except asyncio.CancelledError:
                 _LOGGER.debug("Connection manager cancelled.")
                 break
-            
+
             # Clean up before retrying
             if self._ws and not self._ws.closed:
                 await self._ws.close()
@@ -147,67 +238,54 @@ class TigersecuDVRAPI:
         """Listen for incoming messages from the websocket."""
         _LOGGER.debug("Websocket listener started")
         self._buffer = b""
-        self._boundary = None
 
         while not self._ws.closed:
             msg = await self._ws.receive(timeout=MESSAGE_TIMEOUT)
 
             # The DVR sends a non-standard multipart stream as binary data.
             if msg.type == aiohttp.WSMsgType.BINARY:
-                self._buffer += msg.data
-                try:
-                    # The boundary is defined once in an HTTP response at the start of the stream.
-                    if not self._boundary:
-                        boundary_marker = b"boundary="
-                        boundary_start_index = self._buffer.find(boundary_marker)
-                        if boundary_start_index != -1:
-                            boundary_end_index = self._buffer.find(
-                                b"\r\n", boundary_start_index
-                            )
-                            if boundary_end_index != -1:
-                                self._boundary = self._buffer[
-                                    boundary_start_index
-                                    + len(boundary_marker) : boundary_end_index
-                                ]
-                                _LOGGER.debug("Found multipart boundary: %s", self._boundary)
-                        else:
-                            # Wait for more data if boundary not found yet
-                            continue
-
-                    # Split the buffer by the boundary to get the individual parts
-                    parts = self._buffer.split(self._boundary)
-                    # The last part might be incomplete, so we keep it in the buffer.
-                    self._buffer = parts.pop()
-
-                    if parts:
-                        for part in parts:
-                            # Each valid part contains 'Content-Type: text/plain'
-                            content_type_marker = b"Content-Type: text/plain"
-                            content_type_index = part.find(content_type_marker)
-                            if content_type_index != -1:
-                                # The XML data starts after the marker and the following CRLF
-                                xml_start_index = part.find(b"\r\n", content_type_index)
-                                if xml_start_index != -1:
-                                    # Skip the CRLF itself
-                                    xml_data_bytes = part[xml_start_index + 2 :]
-                                    xml_data_str = xml_data_bytes.strip(
-                                        b" \r\n\x00"
-                                    ).decode("utf-8", errors="ignore")
-                                    if xml_data_str:
-                                        _LOGGER.debug(
-                                            "Parsed XML data from event: %s", xml_data_str
-                                        )
-                                        self._process_xml_triggers(xml_data_str)
-                except Exception as e:
-                    _LOGGER.error("Error parsing binary event stream: %s", e)
-
+                self._process_binary_message(msg.data)
 
             elif msg.type in (
                 aiohttp.WSMsgType.CLOSE,
                 aiohttp.WSMsgType.CLOSED,
                 aiohttp.WSMsgType.ERROR,
             ):
-                raise ConnectionError(f"Websocket connection closed or errored: {msg.type}")
+                raise ConnectionError(
+                    f"Websocket connection closed or errored: {msg.type}"
+                )
+
+    def _process_binary_message(self, data: bytes):
+        """Process a binary message from the websocket."""
+        self._buffer += data
+        try:
+            if not self._boundary:
+                _LOGGER.warning("Boundary not set, cannot process binary stream.")
+                return
+
+            # Split the buffer by the boundary to get the individual parts
+            parts = self._buffer.split(self._boundary)
+            # The last part might be incomplete, so we keep it in the buffer.
+            self._buffer = parts.pop()
+
+            if parts:
+                for part in parts:
+                    # Each valid part contains 'Content-Type: text/plain'
+                    content_type_marker = b"Content-Type: text/plain"
+                    content_type_index = part.find(content_type_marker)
+                    if content_type_index != -1:
+                        # The XML data starts after the marker and the following CRLF
+                        xml_start_index = part.find(b"\r\n", content_type_index)
+                        if xml_start_index != -1:
+                            # Skip the CRLF itself
+                            xml_data_bytes = part[xml_start_index + 2 :]
+                            xml_data_str = xml_data_bytes.strip(b" \r\n\x00").decode(
+                                "utf-8", errors="ignore"
+                            )
+                            if xml_data_str:
+                                self._process_xml_triggers(xml_data_str)
+        except Exception as e:
+            _LOGGER.error("Error parsing binary event stream: %s", e)
 
     def _process_xml_triggers(self, xml_string: str):
         """Parse XML triggers and dispatch them via the callback."""
@@ -230,20 +308,22 @@ class TigersecuDVRAPI:
 
         if len(video_inputs_in_message) > 1:
             discovered_channels = [int(t.get("CH")) for t in video_inputs_in_message]
-            self._emit({"event": "channels_discovered", "channels": discovered_channels})
+            self._emit(
+                {"event": "channels_discovered", "channels": discovered_channels}
+            )
 
         for trigger in root:
             if trigger.tag == "Trigger" and trigger.attrib:
                 # For SMART events, we need the child elements, so pass the full element.
                 self._dispatch_trigger(trigger)
 
-
-
     def _dispatch_trigger(self, trigger: ET.Element):
         """Dispatch a trigger element to the appropriate handler in the API."""
         event_type = trigger.get("Event")
         if not event_type:
-            _LOGGER.debug("Received a trigger with no Event attribute: %s", ET.tostring(trigger))
+            _LOGGER.debug(
+                "Received a trigger with no Event attribute: %s", ET.tostring(trigger)
+            )
             return
 
         handler = self._trigger_handlers.get(event_type)
@@ -263,7 +343,9 @@ class TigersecuDVRAPI:
             motion_mask = int(trigger.get("Value", "0"))
             for channel_id in self.channels:
                 is_motion = bool(motion_mask & (1 << channel_id))
-                self._emit({"event": "motion", "channel": channel_id, "state": is_motion})
+                self._emit(
+                    {"event": "motion", "channel": channel_id, "state": is_motion}
+                )
         except (ValueError, KeyError):
             _LOGGER.warning("Received invalid Motion event: %s", trigger.attrib)
 
