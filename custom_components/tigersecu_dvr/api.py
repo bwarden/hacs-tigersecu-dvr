@@ -106,11 +106,11 @@ class TigersecuDVRAPI:
         _LOGGER.debug("Disconnecting from DVR")
         if self._listen_task and not self._listen_task.done():
             self._listen_task.cancel()
-            # Add a small sleep to allow the task to be cancelled.
+            # Wait for the listener task to finish cancelling
             try:
-                await asyncio.sleep(0)
+                await self._listen_task
             except asyncio.CancelledError:
-                pass
+                _LOGGER.debug("Listener task successfully cancelled.")
         if self._ws and not self._ws.closed:
             await self._ws.close()
 
