@@ -39,7 +39,8 @@ class TigersecuCamera(CoordinatorEntity[DataUpdateCoordinator], Camera):
 
     def __init__(self, dvr: TigersecuDVR, channel_id: int) -> None:
         """Initialize the camera."""
-        super().__init__(dvr.coordinator)
+        CoordinatorEntity.__init__(self, dvr.coordinator)
+        Camera.__init__(self)
         self._dvr = dvr
         self._channel_id = channel_id
         # The name will be like "Channel 1", "Channel 2", etc.
@@ -47,7 +48,7 @@ class TigersecuCamera(CoordinatorEntity[DataUpdateCoordinator], Camera):
         self._attr_unique_id = f"{self._dvr.entry.entry_id}_channel_{self._channel_id}"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, self._dvr.entry.entry_id)},
-            "name": "Tigersecu DVR",
+            "name": self._dvr.host,
             "manufacturer": "Tigersecu",
         }
 
