@@ -32,7 +32,12 @@ async def validate_input(hass: HomeAssistant, data: dict) -> None:
         password=data[CONF_PASSWORD],
         session=session,
     )
-    await api.async_connect()
+    # We use the internal connect method for validation to avoid starting the manager task.
+    try:
+        await asyncio.wait_for(api._connect_internal(), timeout=10)
+    except asyncio.TimeoutError as err:
+        raise ConnectionError("Connection timed out") from err
+    
     await api.async_disconnect()
 
 
