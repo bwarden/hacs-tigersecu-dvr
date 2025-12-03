@@ -78,7 +78,7 @@ class NetworkSensor(TigersecuSensorBase):
         """Initialize the network sensor."""
         super().__init__(dvr)
         self._key = key
-        self._attr_name = f"{self._dvr.host} {name}"
+        self._attr_name = name
         self._attr_icon = icon
         self._attr_native_unit_of_measurement = unit
         self._attr_unique_id = f"{self._dvr.entry.entry_id}_network_{self._key}"
@@ -97,7 +97,7 @@ class LastLoginSensor(TigersecuSensorBase):
     def __init__(self, dvr: TigersecuDVR):
         """Initialize the last login sensor."""
         super().__init__(dvr)
-        self._attr_name = f"{self._dvr.host} Last Login"
+        self._attr_name = "Last Login"
         self._attr_unique_id = f"{self._dvr.entry.entry_id}_last_login"
 
     @property
@@ -119,7 +119,7 @@ class DiskSensor(TigersecuSensorBase):
         super().__init__(dvr)
         self._disk_id = disk_id
         self._key = key
-        self._attr_name = f"{self._dvr.host} Disk {self._disk_id + 1} {name}"
+        self._attr_name = f"Disk {self._disk_id + 1} {name}"
         self._attr_icon = icon
         self._attr_native_unit_of_measurement = unit
         self._attr_unique_id = f"{self._dvr.entry.entry_id}_disk_{self._disk_id}_{self._key}"
@@ -140,7 +140,7 @@ class SmartAttributeSensor(TigersecuSensorBase):
         super().__init__(dvr)
         self._disk_id = disk_id
         self._attr_id = attr_id
-        self._attr_name = f"{self._dvr.host} Disk {self._disk_id + 1} SMART {self._attr_id}"
+        self._attr_name = f"Disk {self._disk_id + 1} SMART {self._attr_id}"
         self._attr_unique_id = f"{self._dvr.entry.entry_id}_disk_{self._disk_id}_smart_{self._attr_id}"
 
     @property

@@ -44,7 +44,7 @@ class TigersecuMotionSensor(CoordinatorEntity, BinarySensorEntity):
         super().__init__(dvr.coordinator)
         self._dvr = dvr
         self._channel_id = channel_id
-        self._attr_name = f"{self._dvr.host} Motion {self._channel_id + 1}"
+        self._attr_name = f"Motion CH{self._channel_id + 1:02d}"
         self._attr_unique_id = f"{self._dvr.entry.entry_id}_motion_{self._channel_id}"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, self._dvr.entry.entry_id)},
@@ -68,7 +68,7 @@ class TigersecuVlossSensor(CoordinatorEntity, BinarySensorEntity):
         super().__init__(dvr.coordinator)
         self._dvr = dvr
         self._channel_id = channel_id
-        self._attr_name = f"{self._dvr.host} Video Loss {self._channel_id + 1}"
+        self._attr_name = f"Video Loss CH{self._channel_id + 1:02d}"
         self._attr_unique_id = (
             f"{self._dvr.entry.entry_id}_vloss_{self._channel_id}"
         )
