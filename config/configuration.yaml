@@ -4,7 +4,7 @@ default_config:
 
 # https://www.home-assistant.io/integrations/homeassistant/
 homeassistant:
-  debug: true
+  debug: false
 
 # https://www.home-assistant.io/integrations/logger/
 logger:
