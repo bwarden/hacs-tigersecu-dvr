@@ -38,6 +38,7 @@ class TigersecuDVRAPI:
         self._buffer = b""
         self._boundary = None
         self.channels = []
+        self.connected = asyncio.Event()
         self._trigger_handlers = {
             "Motion": self._handle_motion_event,
             "VLOSS": self._handle_vloss_event,
@@ -190,6 +191,7 @@ class TigersecuDVRAPI:
         else:
             raise ConnectionError("Boundary not found in 'emsg' confirmation message")
 
+        self.connected.set()
         _LOGGER.debug("Authentication successful in _connect_internal.")
 
     async def async_disconnect(self):
@@ -213,6 +215,7 @@ class TigersecuDVRAPI:
         while True:
             try:
                 await self._connect_internal()
+                self.connected.set()
                 _LOGGER.info("Successfully connected to DVR.")
                 backoff_time = 1  # Reset backoff on successful connection
                 await self._listen()  # This will run until the connection is lost
@@ -230,6 +233,7 @@ class TigersecuDVRAPI:
             # Clean up before retrying
             if self._ws and not self._ws.closed:
                 await self._ws.close()
+            self.connected.clear()
 
             await asyncio.sleep(backoff_time)
             backoff_time = min(backoff_time * 2, 60)

@@ -17,6 +17,7 @@ _LOGGER = logging.getLogger(__name__)
 
 DOMAIN = "tigersecu_dvr"
 
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     """Set up Tigersecu DVR from a config entry."""
     host = entry.data["host"]
@@ -31,23 +32,37 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     except ConnectionError as err:
         raise ConfigEntryNotReady(f"Failed to connect to DVR: {err}") from err
 
+    # Wait for the websocket to confirm it is connected and authenticated.
+    try:
+        await asyncio.wait_for(dvr.api.connected.wait(), timeout=10)
+    except asyncio.TimeoutError as err:
+        raise ConfigEntryNotReady("Connection to DVR timed out") from err
+
     # Wait for the initial data (like camera channels) to be populated
     try:
-        await asyncio.wait_for(dvr.initial_data_received.wait(), timeout=10)
+        await asyncio.wait_for(dvr.initial_data_received.wait(), timeout=30)
     except asyncio.TimeoutError as err:
-        await dvr.api.async_disconnect()
-        raise ConfigEntryNotReady("Did not receive initial data from DVR in time") from err
+        raise ConfigEntryNotReady(
+            "Did not receive initial channel data from DVR in time"
+        ) from err
 
     # Setup platforms now that we have the initial data
-    await hass.config_entries.async_forward_entry_setups(entry, ["camera", "binary_sensor", "sensor"])
+    await hass.config_entries.async_forward_entry_setups(
+        entry, ["camera", "binary_sensor", "sensor"]
+    )
 
     return True
+
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_forward_entry_unload(entry, "camera")
-    unload_ok = unload_ok and await hass.config_entries.async_forward_entry_unload(entry, "binary_sensor")
-    unload_ok = unload_ok and await hass.config_entries.async_forward_entry_unload(entry, "sensor")
+    unload_ok = unload_ok and await hass.config_entries.async_forward_entry_unload(
+        entry, "binary_sensor"
+    )
+    unload_ok = unload_ok and await hass.config_entries.async_forward_entry_unload(
+        entry, "sensor"
+    )
 
     if unload_ok:
         dvr: TigersecuDVR = hass.data[DOMAIN].pop(entry.entry_id)
@@ -103,13 +118,19 @@ class TigersecuDVR:
         if not event_type:
             return
 
+        _LOGGER.debug("Received event: %s", event_type)
+
         # A burst of VideoInput events is a good marker for the end of the initial state dump.
         if event_type == "channels_discovered":
             _LOGGER.debug("Channels discovered: %s", trigger_data.get("channels"))
             self.channels = trigger_data.get("channels", [])
             for channel_id in self.channels:
                 if channel_id not in self.coordinator.data["channels"]:
-                    self.coordinator.data["channels"][channel_id] = {"record_type": "None", "motion_detected": False, "vloss": False}
+                    self.coordinator.data["channels"][channel_id] = {
+                        "record_type": "None",
+                        "motion_detected": False,
+                        "vloss": False,
+                    }
             self.initial_data_received.set()
             # We don't need to process this special event further.
             return
@@ -133,8 +154,14 @@ class TigersecuDVR:
             channel_id = trigger_data.get("channel")
             state = trigger_data.get("state")
             if channel_id not in current_data["channels"]:
-                _LOGGER.debug("Initializing state for channel %s on motion event", channel_id)
-                current_data["channels"][channel_id] = {"motion_detected": not state, "vloss": False, "record_type": "None"}
+                _LOGGER.debug(
+                    "Initializing state for channel %s on motion event", channel_id
+                )
+                current_data["channels"][channel_id] = {
+                    "motion_detected": not state,
+                    "vloss": False,
+                    "record_type": "None",
+                }
 
             if current_data["channels"][channel_id]["motion_detected"] != state:
                 current_data["channels"][channel_id]["motion_detected"] = state
@@ -144,8 +171,14 @@ class TigersecuDVR:
             channel_id = trigger_data.get("channel")
             state = trigger_data.get("state")
             if channel_id not in current_data["channels"]:
-                _LOGGER.debug("Initializing state for channel %s on vloss event", channel_id)
-                current_data["channels"][channel_id] = {"motion_detected": False, "vloss": not state, "record_type": "None"}
+                _LOGGER.debug(
+                    "Initializing state for channel %s on vloss event", channel_id
+                )
+                current_data["channels"][channel_id] = {
+                    "motion_detected": False,
+                    "vloss": not state,
+                    "record_type": "None",
+                }
 
             if current_data["channels"][channel_id]["vloss"] != state:
                 current_data["channels"][channel_id]["vloss"] = state
@@ -155,8 +188,14 @@ class TigersecuDVR:
             channel_id = trigger_data.get("channel")
             record_type = trigger_data.get("type")
             if channel_id not in current_data["channels"]:
-                _LOGGER.debug("Initializing state for channel %s on record event", channel_id)
-                current_data["channels"][channel_id] = {"motion_detected": False, "vloss": False, "record_type": "None"}
+                _LOGGER.debug(
+                    "Initializing state for channel %s on record event", channel_id
+                )
+                current_data["channels"][channel_id] = {
+                    "motion_detected": False,
+                    "vloss": False,
+                    "record_type": "None",
+                }
 
             if current_data["channels"][channel_id]["record_type"] != record_type:
                 current_data["channels"][channel_id]["record_type"] = record_type
@@ -188,22 +227,24 @@ class TigersecuDVR:
             disk_id = int(data.get("ID"))
             if disk_id not in current_data["disks"]:
                 current_data["disks"][disk_id] = {"smart_attributes": {}}
-            
+
             # This part is a bit tricky as Disk events are separate from SMART events.
             # We can merge the data.
-            current_data["disks"][disk_id].update({
-                "model": data.get("Model"),
-                "status": data.get("Status"),
-                "capacity_gb": round(int(data.get("Capacity", 0)) / (1024**3), 2),
-                "available_gb": round(int(data.get("Available", 0)) / (1024**3), 2),
-            })
+            current_data["disks"][disk_id].update(
+                {
+                    "model": data.get("Model"),
+                    "status": data.get("Status"),
+                    "capacity_gb": round(int(data.get("Capacity", 0)) / (1024**3), 2),
+                    "available_gb": round(int(data.get("Available", 0)) / (1024**3), 2),
+                }
+            )
             updated = True
 
         elif event_type == "smart":
             disk_id = trigger_data.get("disk_id")
             if disk_id not in current_data["disks"]:
                 current_data["disks"][disk_id] = {"smart_attributes": {}}
-            
+
             for attr_id, attr_data in trigger_data.get("attributes", {}).items():
                 current_data["disks"][disk_id]["smart_attributes"][attr_id] = {
                     "value": attr_data.get("Value"),
