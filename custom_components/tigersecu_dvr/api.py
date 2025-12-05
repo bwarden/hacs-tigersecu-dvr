@@ -445,6 +445,9 @@ class TigersecuDVRAPI:
 
     def _handle_motion_event(self, trigger: ET.Element):
         """Handle a motion detection event and emit structured data."""
+        # <Trigger Event="Motion" Value="525" Status="17407"/>
+        # Value is a bitmask of channels with motion.
+        # I don't know what Status represents.
         try:
             motion_mask = int(trigger.get("Value", "0"))
             for channel_id in self.channels:
@@ -457,6 +460,9 @@ class TigersecuDVRAPI:
 
     def _handle_vloss_event(self, trigger: ET.Element):
         """Handle a video loss event and emit structured data."""
+        # <Trigger Event="VLOSS" Value="23552" Status="24576"/>
+        # Value is a bitmask of channels with video loss.
+        # I don't know what Status represents.
         try:
             vloss_mask = int(trigger.get("Value", "0"))
             for channel_id in self.channels:
@@ -467,10 +473,13 @@ class TigersecuDVRAPI:
 
     def _handle_sensor_event(self, trigger: ET.Element):
         """Handle a sensor event and emit structured data."""
+        # <Trigger Event="Sensor" Value="5" Status="0"/>
+        # Value is a bitmask of sensors that are active.
+        # I don't know what Status represents.
         try:
             sensor_mask = int(trigger.get("Value", "0"))
             # Unlike Motion or VLOSS, the sensor bitmask is not tied to channels.
-            # Each bit represents a distinct sensor, numbered 0-15. We assume
+            # Each bit represents a distinct sensor. We assume
             # that if sensor 'N' is asserted, sensors 0 through N all exist.
             if sensor_mask > 0:
                 # Find the highest asserted sensor ID.
@@ -494,10 +503,16 @@ class TigersecuDVRAPI:
 
     def _handle_disk_event(self, trigger: ET.Element):
         """Handle a disk status event."""
+        # <Trigger Event="Disk" ID="0" Num="1" Model="WDC WD10PURX-64E" Status="Record" Flag="OVWR" Capacity="1000203091968" Available="75497472" Error="0"/>
+        # ID and Num are probably more clear if you have multiple disks; I don't.
+        # Status is a string like "Record" or "Idle".
+        # OVWR means overwrite mode is enabled; freeing up space by deleting old footage.
         self._emit({"event": "disk", "data": trigger.attrib})
 
     def _handle_login_event(self, trigger: ET.Element):
         """Handle a user login event."""
+        # <Trigger Event="Login" User="admin" From="127.0.0.1"/>
+        # From isn't usually the actual source IP.
         self._emit({"event": "login", "data": trigger.attrib})
 
     def _handle_network_event(self, trigger: ET.Element):
