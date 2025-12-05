@@ -339,18 +339,57 @@ class TigersecuDVRAPI:
                     )
                     return  # Wait for the rest of the message
 
-                self._emsg_header = self._buffer[4:68]
-                # The rest of the buffer is the text payload (multipart MIME)
-                text_payload = self._buffer[68:]
-                self._buffer = b""  # Clear buffer as we process the text part
+                # An 'emsg' block contains HTTP-like headers and a payload.
+                # Find the end of the headers (double CRLF).
+                headers_end_pos = self._buffer.find(b"\r\n\r\n", 68)
+                if headers_end_pos == -1:
+                    _LOGGER.debug(
+                        "Incomplete 'emsg' headers received, waiting for more data."
+                    )
+                    return
 
-                # The first emsg after connection contains the boundary.
+                header_data = self._buffer[68:headers_end_pos].decode(
+                    "utf-8", errors="ignore"
+                )
+                payload_start_pos = headers_end_pos + 4
+
+                # Parse headers to find Content-Type and a new boundary if it exists.
+                content_type = None
+                for line in header_data.split("\r\n"):
+                    if line.lower().startswith("content-type:"):
+                        content_type = line.split(":", 1)[1].strip()
+                        if "boundary=" in content_type:
+                            new_boundary = content_type.split("boundary=")[1].strip()
+                            self._boundary = new_boundary.encode()
+                            _LOGGER.debug(
+                                "Updated multipart boundary: %s", self._boundary
+                            )
+
                 if not self._boundary:
-                    emsg_data = text_payload.decode("utf-8", errors="ignore")
-                    self._parse_boundary_from_emsg(emsg_data)
-                else:
-                    # Subsequent emsg payloads are multipart MIME segments.
-                    self._process_multipart_payload(text_payload)
+                    _LOGGER.error("No boundary defined, cannot process emsg payload.")
+                    # Discard the message to avoid getting stuck
+                    self._buffer = self._buffer[payload_start_pos:]
+                    continue
+
+                # The payload is terminated by the boundary.
+                boundary_pos = self._buffer.find(self._boundary, payload_start_pos)
+                if boundary_pos == -1:
+                    _LOGGER.debug("Incomplete 'emsg' payload, waiting for more data.")
+                    return
+
+                payload = self._buffer[payload_start_pos:boundary_pos]
+
+                if content_type and "text/plain" in content_type:
+                    self._process_multipart_payload(payload)
+
+                # Consume the processed message from the buffer, including the boundary.
+                # The boundary might have a trailing '--' and is followed by CRLF.
+                end_of_message = self._buffer.find(b"\r\n", boundary_pos)
+                if end_of_message == -1:
+                    # Should not happen if we found the boundary, but as a fallback...
+                    end_of_message = boundary_pos + len(self._boundary)
+
+                self._buffer = self._buffer[end_of_message + 2 :]
                 continue
 
             # If we get here, we have an unknown prefix.
@@ -383,24 +422,11 @@ class TigersecuDVRAPI:
         if not self._boundary:
             _LOGGER.warning("Boundary not set, cannot process multipart payload.")
             return
-
-        # The payload is a single part of the multipart stream.
-        # We need to find the XML data within it.
         try:
-            # Each valid part contains 'Content-Type: text/plain'
-            content_type_marker = b"Content-Type: text/plain"
-            content_type_index = payload.find(content_type_marker)
-            if content_type_index != -1:
-                # The XML data starts after the marker and the following CRLF
-                xml_start_index = payload.find(b"\r\n", content_type_index)
-                if xml_start_index != -1:
-                    # Skip the CRLF itself
-                    xml_data_bytes = payload[xml_start_index + 2 :]
-                    xml_data_str = xml_data_bytes.strip(b" \r\n\x00").decode(
-                        "utf-8", errors="ignore"
-                    )
-                    if xml_data_str:
-                        self._process_xml_triggers(xml_data_str)
+            # The payload is the XML content itself.
+            xml_data_str = payload.strip(b" \r\n\x00").decode("utf-8", errors="ignore")
+            if xml_data_str:
+                self._process_xml_triggers(xml_data_str)
         except Exception as e:
             _LOGGER.error(
                 "Error parsing multipart payload: %s. Payload: %s", e, payload.hex()
