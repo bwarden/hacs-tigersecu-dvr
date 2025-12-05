@@ -21,12 +21,39 @@ _LOGGER = logging.getLogger(__name__)
 
 async def raw_xml_logger(xml_string: str):
     """Callback to log raw XML strings to stdout."""
-    print(f"--- RAW XML TRIGGER ---\n{xml_string}\n-----------------------")
+    print(f"--- XML Payload ---\n{xml_string}\n-------------------")
 
 
 async def raw_binary_logger(data: bytes):
     """Callback to log raw binary data to stdout."""
-    print(f"--- RAW BINARY DATA ---\n{data.hex()}\n-----------------------")
+    print("--- Raw binary message ---")
+    offset = 0
+    chunk_size = 16
+    while offset < len(data):
+        chunk = data[offset : offset + chunk_size]
+
+        # Format the address part
+        addr = f"{offset:08x}"
+
+        # Format the hex part with a double space in the middle
+        hex_bytes = [f"{b:02x}" for b in chunk]
+        hex_part1 = " ".join(hex_bytes[:8])
+        hex_part2 = " ".join(hex_bytes[8:])
+        # Pad to align columns if the chunk is smaller than 16 bytes
+        hex_part_full = f"{hex_part1:<23s}  {hex_part2:<23s}"
+
+        # Format the ASCII part
+        ascii_part = "".join(chr(b) if 32 <= b <= 126 else "." for b in chunk)
+
+        print(f"{addr}  {hex_part_full}  |{ascii_part}|")
+        offset += chunk_size
+    print("--------------------------")
+
+
+async def raw_binary_dumper(data: bytes):
+    """Callback to dump raw binary data directly to stdout."""
+    sys.stdout.buffer.write(data)
+    sys.stdout.buffer.flush()
 
 
 async def main():
@@ -50,6 +77,11 @@ async def main():
         action="store_true",
         help="Log the raw binary message stream as hex",
     )
+    parser.add_argument(
+        "--raw-dump",
+        action="store_true",
+        help="Dump the raw, unprocessed binary stream to stdout. All other logs go to stderr.",
+    )
 
     args = parser.parse_args()
 
@@ -61,17 +93,28 @@ async def main():
             print("\nPassword entry cancelled.")
             return
 
+    # Determine logging stream. For raw dump, logs go to stderr.
+    log_stream = sys.stderr if args.raw_dump else sys.stdout
+
     # Configure logging
     log_level = logging.DEBUG if args.debug else logging.INFO
     logging.basicConfig(
         level=log_level,
-        stream=sys.stdout,
+        stream=log_stream,
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
     )
 
     _LOGGER.info("Starting DVR logger for %s", args.host)
 
-    binary_callback = raw_binary_logger if args.log_binary else None
+    xml_callback = raw_xml_logger
+    binary_callback = None
+
+    if args.raw_dump:
+        _LOGGER.info("Raw dump mode enabled. Binary data will be sent to stdout.")
+        xml_callback = None  # Disable XML logging in raw dump mode
+        binary_callback = raw_binary_dumper
+    elif args.log_binary:
+        binary_callback = raw_binary_logger
 
     session = aiohttp.ClientSession()
     api = TigersecuDVRAPI(
@@ -79,9 +122,8 @@ async def main():
         username=args.username,
         password=args.password,
         session=session,
-        # We don't need the structured data callback for this tool
         update_callback=None,
-        raw_xml_callback=raw_xml_logger,
+        raw_xml_callback=xml_callback,
         raw_binary_callback=binary_callback,
     )
 
