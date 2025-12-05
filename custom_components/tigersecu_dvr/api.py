@@ -36,6 +36,7 @@ class TigersecuDVRAPI:
         self._listen_task = None
         self._manager_task = None
         self._buffer = b""
+        self._emsg_header = None  # To store the 64-byte emsg header
         self._boundary = None
         self.channels = []
         self.connected = asyncio.Event()
@@ -141,6 +142,7 @@ class TigersecuDVRAPI:
         # Send the authentication string as the first message.
         _LOGGER.debug("Websocket connected, sending auth string")
         auth_message = f"Basic {auth_str}"
+        self._auth_message = auth_message
         await self._ws.send_str(auth_message)
 
         # Wait for the two confirmation messages from the DVR: "wsev" and "emsg".
@@ -261,35 +263,96 @@ class TigersecuDVRAPI:
 
     def _process_binary_message(self, data: bytes):
         """Process a binary message from the websocket."""
+        # The DVR sends a stream of messages, each prefixed with a 4-byte identifier.
         self._buffer += data
+
+        while len(self._buffer) >= 4:
+            prefix = self._buffer[:4].decode("ascii", errors="ignore")
+
+            if prefix == "erqu":
+                _LOGGER.error(
+                    "Received 'erqu' message, connection is invalid. Reconnecting."
+                )
+                # This will cause the _listen loop to exit and the manager to reconnect.
+                raise ConnectionError("Received 'erqu' from DVR")
+
+            if prefix == "wsev":
+                _LOGGER.debug("Received 'wsev' message, re-authenticating.")
+                # The message is just the prefix, sometimes with a linefeed.
+                # We find the end of the line to consume the correct number of bytes.
+                wsev_end = self._buffer.find(b"\n", 4)
+                if wsev_end == -1:
+                    wsev_end = 4  # Assume just the 4 bytes if no newline
+                self._buffer = self._buffer[wsev_end + 1 :]
+                asyncio.create_task(self._ws.send_str(self._auth_message))
+                continue  # Continue processing the rest of the buffer
+
+            if prefix == "emsg":
+                # An 'emsg' is followed by 64 bytes of binary data, then the text payload.
+                if len(self._buffer) < 68:  # 4 bytes for 'emsg' + 64 bytes for header
+                    _LOGGER.debug("Incomplete 'emsg' received, waiting for more data.")
+                    return  # Wait for the rest of the message
+
+                self._emsg_header = self._buffer[4:68]
+                # The rest of the buffer is the text payload (multipart MIME)
+                text_payload = self._buffer[68:]
+                self._buffer = b""  # Clear buffer as we process the text part
+
+                # The first emsg after connection contains the boundary.
+                if not self._boundary:
+                    emsg_data = text_payload.decode("utf-8", errors="ignore")
+                    self._parse_boundary_from_emsg(emsg_data)
+                else:
+                    # Subsequent emsg payloads are multipart MIME segments.
+                    self._process_multipart_payload(text_payload)
+                continue
+
+            # If we get here, we have an unknown prefix.
+            _LOGGER.warning(
+                "Unknown message prefix '%s', discarding one byte and retrying.", prefix
+            )
+            self._buffer = self._buffer[1:]
+
+    def _parse_boundary_from_emsg(self, emsg_data: str):
+        """Extract the multipart boundary from the initial emsg payload."""
+        boundary_marker = "boundary="
+        boundary_start_index = emsg_data.find(boundary_marker)
+        if boundary_start_index != -1:
+            boundary_start = boundary_start_index + len(boundary_marker)
+            # The boundary is terminated by a newline
+            boundary_end_index = emsg_data.find("\r\n", boundary_start)
+            if boundary_end_index == -1:
+                boundary_end_index = len(emsg_data)
+            self._boundary = emsg_data[boundary_start:boundary_end_index].encode()
+            _LOGGER.debug("Found multipart boundary: %s", self._boundary)
+        else:
+            _LOGGER.error("Boundary not found in initial 'emsg' message")
+
+    def _process_multipart_payload(self, payload: bytes):
+        """Process a multipart MIME payload containing XML triggers."""
+        if not self._boundary:
+            _LOGGER.warning("Boundary not set, cannot process multipart payload.")
+            return
+
+        # The payload is a single part of the multipart stream.
+        # We need to find the XML data within it.
         try:
-            if not self._boundary:
-                _LOGGER.warning("Boundary not set, cannot process binary stream.")
-                return
-
-            # Split the buffer by the boundary to get the individual parts
-            parts = self._buffer.split(self._boundary)
-            # The last part might be incomplete, so we keep it in the buffer.
-            self._buffer = parts.pop()
-
-            if parts:
-                for part in parts:
-                    # Each valid part contains 'Content-Type: text/plain'
-                    content_type_marker = b"Content-Type: text/plain"
-                    content_type_index = part.find(content_type_marker)
-                    if content_type_index != -1:
-                        # The XML data starts after the marker and the following CRLF
-                        xml_start_index = part.find(b"\r\n", content_type_index)
-                        if xml_start_index != -1:
-                            # Skip the CRLF itself
-                            xml_data_bytes = part[xml_start_index + 2 :]
-                            xml_data_str = xml_data_bytes.strip(b" \r\n\x00").decode(
-                                "utf-8", errors="ignore"
-                            )
-                            if xml_data_str:
-                                self._process_xml_triggers(xml_data_str)
+            # Each valid part contains 'Content-Type: text/plain'
+            content_type_marker = b"Content-Type: text/plain"
+            content_type_index = payload.find(content_type_marker)
+            if content_type_index != -1:
+                # The XML data starts after the marker and the following CRLF
+                xml_start_index = payload.find(b"\r\n", content_type_index)
+                if xml_start_index != -1:
+                    # Skip the CRLF itself
+                    xml_data_bytes = payload[xml_start_index + 2 :]
+                    xml_data_str = xml_data_bytes.strip(b" \r\n\x00").decode(
+                        "utf-8", errors="ignore"
+                    )
+                    if xml_data_str:
+                        self._process_xml_triggers(xml_data_str)
         except Exception as e:
-            _LOGGER.error("Error parsing binary event stream: %s", e)
+            _LOGGER.error("Error parsing multipart payload: %s", e)
 
     def _process_xml_triggers(self, xml_string: str):
         """Parse XML triggers and dispatch them via the callback."""
