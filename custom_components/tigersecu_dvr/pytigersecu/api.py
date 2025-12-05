@@ -5,6 +5,7 @@ import base64
 import logging
 import ssl
 from typing import Awaitable, Callable
+from email.parser import BytesParser
 from xml.etree import ElementTree as ET
 
 import aiohttp
@@ -348,22 +349,18 @@ class TigersecuDVRAPI:
                     )
                     return
 
-                header_data = self._buffer[68:headers_end_pos].decode(
-                    "utf-8", errors="ignore"
-                )
+                header_bytes = self._buffer[68:headers_end_pos]
                 payload_start_pos = headers_end_pos + 4
 
-                # Parse headers to find Content-Type and a new boundary if it exists.
-                content_type = None
-                for line in header_data.split("\r\n"):
-                    if line.lower().startswith("content-type:"):
-                        content_type = line.split(":", 1)[1].strip()
-                        if "boundary=" in content_type:
-                            new_boundary = content_type.split("boundary=")[1].strip()
-                            self._boundary = new_boundary.encode()
-                            _LOGGER.debug(
-                                "Updated multipart boundary: %s", self._boundary
-                            )
+                # Use the standard library to parse the HTTP-like headers
+                headers = BytesParser().parsebytes(header_bytes)
+                content_type = headers.get("content-type")
+
+                if content_type and "boundary=" in content_type:
+                    # The boundary value in the header might be quoted
+                    new_boundary = content_type.split("boundary=")[1].strip().strip('"')
+                    self._boundary = new_boundary.encode()
+                    _LOGGER.debug("Updated multipart boundary: %s", self._boundary)
 
                 if not self._boundary:
                     _LOGGER.error("No boundary defined, cannot process emsg payload.")
