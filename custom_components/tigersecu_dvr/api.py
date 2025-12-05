@@ -39,6 +39,7 @@ class TigersecuDVRAPI:
         self._emsg_header = None  # To store the 64-byte emsg header
         self._boundary = None
         self.channels = []
+        self.discovered_sensors = set()
         self.connected = asyncio.Event()
         self._trigger_handlers = {
             "Motion": self._handle_motion_event,
@@ -48,6 +49,7 @@ class TigersecuDVRAPI:
             "Login": self._handle_login_event,
             "Network": self._handle_network_event,
             "SMART": self._handle_smart_event,
+            "Sensor": self._handle_sensor_event,
             "VideoInput": self._handle_video_input_event,
         }
 
@@ -425,6 +427,33 @@ class TigersecuDVRAPI:
                 self._emit({"event": "vloss", "channel": channel_id, "state": is_vloss})
         except (ValueError, KeyError):
             _LOGGER.warning("Received invalid VLOSS event: %s", trigger.attrib)
+
+    def _handle_sensor_event(self, trigger: ET.Element):
+        """Handle a sensor event and emit structured data."""
+        try:
+            sensor_mask = int(trigger.get("Value", "0"))
+            # Unlike Motion or VLOSS, the sensor bitmask is not tied to channels.
+            # Each bit represents a distinct sensor, numbered 0-15. We assume
+            # that if sensor 'N' is asserted, sensors 0 through N all exist.
+            if sensor_mask > 0:
+                # Find the highest asserted sensor ID.
+                max_asserted_id = sensor_mask.bit_length() - 1
+                # Add all sensors up to that ID to our discovered set.
+                for i in range(max_asserted_id + 1):
+                    self.discovered_sensors.add(i)
+
+            # Iterate over a copy of the set, as it could be modified elsewhere.
+            for sensor_id in self.discovered_sensors.copy():
+                is_sensor_active = bool(sensor_mask & (1 << sensor_id))
+                self._emit(
+                    {
+                        "event": "sensor",
+                        "sensor_id": sensor_id,
+                        "state": is_sensor_active,
+                    }
+                )
+        except (ValueError, KeyError):
+            _LOGGER.warning("Received invalid Sensor event: %s", trigger.attrib)
 
     def _handle_disk_event(self, trigger: ET.Element):
         """Handle a disk status event."""
