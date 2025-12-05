@@ -98,6 +98,7 @@ class TigersecuDVR:
             "channels": {},
             "disks": {},
             "network": {},
+            "disk_scheme": None,
             "sensors": {},
             "last_login": None,
         }
@@ -282,6 +283,12 @@ class TigersecuDVR:
 
             if current_data["sensors"].get(sensor_id) != state:
                 current_data["sensors"][sensor_id] = state
+                updated = True
+
+        elif event_type == "scheme":
+            scheme_id = trigger_data.get("id")
+            if current_data["disk_scheme"] != scheme_id:
+                current_data["disk_scheme"] = scheme_id
                 updated = True
 
         if updated:

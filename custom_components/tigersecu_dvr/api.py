@@ -49,6 +49,7 @@ class TigersecuDVRAPI:
             "Login": self._handle_login_event,
             "Network": self._handle_network_event,
             "SMART": self._handle_smart_event,
+            "Scheme": self._handle_scheme_event,
             "Sensor": self._handle_sensor_event,
             "VideoInput": self._handle_video_input_event,
         }
@@ -485,6 +486,14 @@ class TigersecuDVRAPI:
             )
         except (ValueError, KeyError, TypeError):
             _LOGGER.warning("Received invalid SMART event: %s", trigger.attrib)
+
+    def _handle_scheme_event(self, trigger: ET.Element):
+        """Handle a disk scheme event."""
+        try:
+            scheme_id = int(trigger.get("ID"))
+            self._emit({"event": "scheme", "id": scheme_id})
+        except (ValueError, KeyError, TypeError):
+            _LOGGER.warning("Received invalid Scheme event: %s", trigger.attrib)
 
     def _handle_record_event(self, trigger: ET.Element):
         """Handle a record status event."""
