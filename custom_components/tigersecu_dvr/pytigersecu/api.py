@@ -86,51 +86,13 @@ class TigersecuDVRAPI:
             ws = await self._session.ws_connect(
                 url, protocols=("message",), ssl=ssl_context, timeout=10
             )
+            # Just send the auth string. If it's invalid, the DVR will close the connection.
             await ws.send_str(f"Basic {auth_str}")
-            # Wait for the two confirmation messages: "wsev" and "emsg".
-            wsev_response = await ws.receive(timeout=10)
-            wsev_data = wsev_response.data
-            if wsev_response.type == aiohttp.WSMsgType.BINARY:
-                wsev_data = wsev_data.decode("utf-8", errors="ignore")
-
-            if (
-                wsev_response.type
-                not in (
-                    aiohttp.WSMsgType.TEXT,
-                    aiohttp.WSMsgType.BINARY,
-                )
-                or "wsev" not in wsev_data
-            ):
+            # Wait briefly to see if the connection is rejected.
+            await asyncio.sleep(1)
+            if ws.closed:
                 raise ConnectionError(
-                    f"Authentication failed during validation: 'wsev' confirmation not found. "
-                    f"Received: {wsev_response.data.hex() if isinstance(wsev_response.data, bytes) else wsev_response.data}"
-                )
-
-            # The second message is "emsg", we just need to receive it.
-            emsg_response = await ws.receive(timeout=10)
-            emsg_data = emsg_response.data
-            if emsg_response.type == aiohttp.WSMsgType.BINARY:
-                emsg_data = emsg_data.decode("utf-8", errors="ignore")
-
-            if "emsg" not in emsg_data:
-                raise ConnectionError(
-                    f"Authentication failed during validation: 'emsg' confirmation not found. "
-                    f"Received: {emsg_response.data.hex() if isinstance(emsg_response.data, bytes) else emsg_response.data}"
-                )
-
-            # The emsg contains the boundary for the multipart stream.
-            boundary_marker = "boundary="
-            boundary_start_index = emsg_data.find(boundary_marker)
-            if boundary_start_index != -1:
-                boundary_start = boundary_start_index + len(boundary_marker)
-                # The boundary is terminated by a newline
-                boundary_end_index = emsg_data.find("\r\n", boundary_start)
-                if boundary_end_index == -1:
-                    boundary_end_index = len(emsg_data)
-            else:
-                raise ConnectionError(
-                    f"Authentication failed: boundary not found in 'emsg' confirmation. "
-                    f"Received: {emsg_response.data.hex() if isinstance(emsg_response.data, bytes) else emsg_response.data}"
+                    "Connection rejected by DVR after authentication."
                 )
 
         finally:
@@ -161,68 +123,6 @@ class TigersecuDVRAPI:
         auth_message = f"Basic {auth_str}"
         self._auth_message = auth_message
         await self._ws.send_str(auth_message)
-
-        # Wait for the two confirmation messages from the DVR: "wsev" and "emsg".
-        _LOGGER.debug("Waiting for authentication confirmation messages.")
-
-        # First message should be "wsev"
-        wsev_response = await self._ws.receive(timeout=10)
-        wsev_data = wsev_response.data
-        if wsev_response.type == aiohttp.WSMsgType.BINARY:
-            # Decode with errors ignored, as the message may be wrapped in other binary data
-            wsev_data = wsev_data.decode("utf-8", errors="ignore")
-
-        if (
-            wsev_response.type
-            not in (
-                aiohttp.WSMsgType.TEXT,
-                aiohttp.WSMsgType.BINARY,
-            )
-            or "wsev" not in wsev_data
-        ):
-            _LOGGER.error(
-                "Authentication failed: 'wsev' confirmation not found in message. Got: %s",
-                wsev_response.data.hex()
-                if isinstance(wsev_response.data, bytes)
-                else wsev_response.data,
-            )
-            raise ConnectionError("Authentication failed on 'wsev' confirmation")
-
-        # Second message is "emsg" and contains the boundary
-        emsg_response = await self._ws.receive(timeout=10)
-        emsg_data = emsg_response.data
-        if emsg_response.type == aiohttp.WSMsgType.BINARY:
-            emsg_data = emsg_data.decode("utf-8", errors="ignore")
-
-        if "emsg" not in emsg_data:
-            _LOGGER.error(
-                "Authentication failed: 'emsg' confirmation not found. Got: %s",
-                emsg_response.data.hex()
-                if isinstance(emsg_response.data, bytes)
-                else emsg_response.data,
-            )
-            raise ConnectionError(
-                "Authentication failed: 'emsg' confirmation not found"
-            )
-
-        boundary_marker = "boundary="
-        boundary_start_index = emsg_data.find(boundary_marker)
-        if boundary_start_index != -1:
-            boundary_start = boundary_start_index + len(boundary_marker)
-            # The boundary is terminated by a newline
-            boundary_end_index = emsg_data.find("\r\n", boundary_start)
-            if boundary_end_index == -1:
-                boundary_end_index = len(emsg_data)
-            self._boundary = emsg_data[boundary_start:boundary_end_index].encode()
-            _LOGGER.debug("Found multipart boundary: %s", self._boundary)
-        else:
-            _LOGGER.error(
-                "Boundary not found in 'emsg' confirmation message. Got: %s",
-                emsg_response.data.hex()
-                if isinstance(emsg_response.data, bytes)
-                else emsg_response.data,
-            )
-            raise ConnectionError("Boundary not found in 'emsg' confirmation message")
 
         self.connected.set()
         _LOGGER.debug("Authentication successful in _connect_internal.")
@@ -283,7 +183,7 @@ class TigersecuDVRAPI:
                 _LOGGER.warning(
                     "No message received in %s seconds. Buffer content: %s",
                     MESSAGE_TIMEOUT,
-                    self._buffer.hex(),
+                    self._buffer[:32].hex(),
                 )
                 raise ConnectionError("Websocket timeout")
 
@@ -315,7 +215,7 @@ class TigersecuDVRAPI:
                 _LOGGER.error(
                     "Received '%s' message, connection is invalid. Reconnecting. Buffer: %s",
                     prefix,
-                    self._buffer.hex(),
+                    self._buffer[:32].hex(),
                 )
                 # This will cause the _listen loop to exit and the manager to reconnect.
                 raise ConnectionError(f"Received '{prefix}' from DVR")
@@ -336,7 +236,7 @@ class TigersecuDVRAPI:
                 if len(self._buffer) < 68:  # 4 bytes for 'emsg' + 64 bytes for header
                     _LOGGER.debug(
                         "Incomplete 'emsg' received, waiting for more data. Buffer: %s",
-                        self._buffer.hex(),
+                        self._buffer[:32].hex(),
                     )
                     return  # Wait for the rest of the message
 
@@ -352,6 +252,17 @@ class TigersecuDVRAPI:
                 header_bytes = self._buffer[68:headers_end_pos]
                 payload_start_pos = headers_end_pos + 4
 
+                # The DVR sometimes includes an HTTP status line before the headers.
+                # If present, strip it out before parsing.
+                if header_bytes.lstrip().startswith(b"HTTP/"):
+                    http_end_pos = header_bytes.find(b"\n")
+                    if http_end_pos != -1:
+                        _LOGGER.debug(
+                            "Stripping HTTP status line from emsg headers: %s",
+                            header_bytes[:http_end_pos].decode(errors="ignore"),
+                        )
+                        header_bytes = header_bytes[http_end_pos + 1 :]
+
                 # Use the standard library to parse the HTTP-like headers
                 headers = BytesParser().parsebytes(header_bytes)
                 content_type = headers.get("content-type")
@@ -362,9 +273,16 @@ class TigersecuDVRAPI:
                     self._boundary = new_boundary.encode()
                     _LOGGER.debug("Updated multipart boundary: %s", self._boundary)
 
+                # If we are here, this should be a data-carrying emsg.
+                # If we don't have a boundary yet, it's an error.
                 if not self._boundary:
-                    _LOGGER.error("No boundary defined, cannot process emsg payload.")
-                    # Discard the message to avoid getting stuck
+                    _LOGGER.error(
+                        "No boundary defined, but received a non-boundary-defining emsg. Discarding."
+                    )
+                    _LOGGER.debug(
+                        "Problematic emsg content: %s",
+                        self._buffer[:payload_start_pos].hex(),
+                    )
                     self._buffer = self._buffer[payload_start_pos:]
                     continue
 
@@ -390,10 +308,26 @@ class TigersecuDVRAPI:
                 continue
 
             # If we get here, we have an unknown prefix.
+            if self._boundary:
+                _LOGGER.warning(
+                    "Unknown message prefix '%s'. Attempting to re-sync by finding next boundary. Buffer: %s",
+                    prefix,
+                    self._buffer[:32].hex(),
+                )
+                boundary_pos = self._buffer.find(self._boundary)
+                if boundary_pos != -1:
+                    # Discard everything up to and including the boundary line to re-sync.
+                    end_of_boundary = self._buffer.find(b"\r\n", boundary_pos)
+                    if end_of_boundary != -1:
+                        self._buffer = self._buffer[end_of_boundary + 2 :]
+                        _LOGGER.debug("Re-synced stream after finding boundary.")
+                        continue  # Restart the while loop with the re-synced buffer
+
+            # Fallback to old behavior if no boundary is set or found
             _LOGGER.warning(
-                "Unknown message prefix '%s', discarding one byte and retrying. Buffer: %s",
+                "Unknown message prefix '%s' and could not re-sync. Discarding one byte. Buffer: %s",
                 prefix,
-                self._buffer.hex(),
+                self._buffer[:32].hex(),
             )
             self._buffer = self._buffer[1:]
 
