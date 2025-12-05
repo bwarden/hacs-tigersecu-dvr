@@ -221,15 +221,10 @@ class TigersecuDVRAPI:
                 raise ConnectionError(f"Received '{prefix}' from DVR")
 
             if prefix == "wsev":
-                _LOGGER.debug("Received 'wsev' message, re-authenticating.")
-                # The message is just the prefix, sometimes with a linefeed.
-                # We find the end of the line to consume the correct number of bytes.
-                wsev_end = self._buffer.find(b"\n", 4)
-                if wsev_end == -1:
-                    wsev_end = 4  # Assume just the 4 bytes if no newline
-                self._buffer = self._buffer[wsev_end + 1 :]
-                asyncio.create_task(self._ws.send_str(self._auth_message))
-                continue  # Continue processing the rest of the buffer
+                _LOGGER.debug("Received 'wsev' acknowledgment.")
+                # This is just an acknowledgment. Consume the 4 bytes and continue processing.
+                self._buffer = self._buffer[4:]
+                continue
 
             if prefix == "emsg":
                 # An 'emsg' is followed by 64 bytes of binary data, then the text payload.
@@ -258,35 +253,52 @@ class TigersecuDVRAPI:
                     http_end_pos = header_bytes.find(b"\n")
                     if http_end_pos != -1:
                         _LOGGER.debug(
-                            "Stripping HTTP status line from emsg headers: %s",
-                            header_bytes[:http_end_pos].decode(errors="ignore"),
+                            "HTTP status from emsg headers: %s",
+                            header_bytes[:http_end_pos].strip().decode(errors="ignore"),
                         )
                         header_bytes = header_bytes[http_end_pos + 1 :]
 
-                # Use the standard library to parse the HTTP-like headers
-                headers = BytesParser().parsebytes(header_bytes)
-                content_type = headers.get("content-type")
+                # The first emsg defines the boundary for the multipart stream.
+                # We check for this case first.
+                header_str = header_bytes.decode("utf-8", errors="ignore")
+                if not self._boundary and "boundary=" in header_str:
+                    headers = BytesParser().parsebytes(header_bytes)
+                    content_type = headers.get("content-type")
+                    if content_type:
+                        # The boundary value in the header might be quoted
+                        new_boundary = (
+                            content_type.split("boundary=")[1].strip().strip('"')
+                        )
+                        self._boundary = new_boundary.encode()
+                        _LOGGER.debug("Updated multipart boundary: %s", self._boundary)
 
-                if content_type and "boundary=" in content_type:
-                    # The boundary value in the header might be quoted
-                    new_boundary = content_type.split("boundary=")[1].strip().strip('"')
-                    self._boundary = new_boundary.encode()
-                    _LOGGER.debug("Updated multipart boundary: %s", self._boundary)
+                        # The boundary-defining emsg is followed by the first boundary string.
+                        # We need to find and consume it to sync the stream.
+                        first_boundary_pos = self._buffer.find(
+                            self._boundary, payload_start_pos
+                        )
+                        if first_boundary_pos != -1:
+                            # Consume up to the end of the boundary line
+                            end_of_first_boundary = self._buffer.find(
+                                b"\n", first_boundary_pos
+                            )
+                            if end_of_first_boundary != -1:
+                                self._buffer = self._buffer[end_of_first_boundary + 1 :]
+                                continue
 
                 # If we are here, this should be a data-carrying emsg.
                 # If we don't have a boundary yet, it's an error.
-                if not self._boundary:
-                    _LOGGER.error(
-                        "No boundary defined, but received a non-boundary-defining emsg. Discarding."
-                    )
-                    _LOGGER.debug(
-                        "Problematic emsg content: %s",
-                        self._buffer[:payload_start_pos].hex(),
-                    )
+                elif not self._boundary:
+                    _LOGGER.error("No boundary defined, cannot process emsg payload.")
+                    # Discard the message to avoid getting stuck
                     self._buffer = self._buffer[payload_start_pos:]
                     continue
 
                 # The payload is terminated by the boundary.
+                # This part handles subsequent data-carrying emsg blocks.
+                headers = BytesParser().parsebytes(header_bytes)
+                content_type = headers.get("content-type")
+
                 boundary_pos = self._buffer.find(self._boundary, payload_start_pos)
                 if boundary_pos == -1:
                     _LOGGER.debug("Incomplete 'emsg' payload, waiting for more data.")
@@ -308,24 +320,8 @@ class TigersecuDVRAPI:
                 continue
 
             # If we get here, we have an unknown prefix.
-            if self._boundary:
-                _LOGGER.warning(
-                    "Unknown message prefix '%s'. Attempting to re-sync by finding next boundary. Buffer: %s",
-                    prefix,
-                    self._buffer[:32].hex(),
-                )
-                boundary_pos = self._buffer.find(self._boundary)
-                if boundary_pos != -1:
-                    # Discard everything up to and including the boundary line to re-sync.
-                    end_of_boundary = self._buffer.find(b"\r\n", boundary_pos)
-                    if end_of_boundary != -1:
-                        self._buffer = self._buffer[end_of_boundary + 2 :]
-                        _LOGGER.debug("Re-synced stream after finding boundary.")
-                        continue  # Restart the while loop with the re-synced buffer
-
-            # Fallback to old behavior if no boundary is set or found
             _LOGGER.warning(
-                "Unknown message prefix '%s' and could not re-sync. Discarding one byte. Buffer: %s",
+                "Unknown message prefix '%s', discarding one byte and retrying. Buffer: %s",
                 prefix,
                 self._buffer[:32].hex(),
             )
