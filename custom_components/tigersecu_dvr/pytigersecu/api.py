@@ -25,6 +25,8 @@ class TigersecuDVRAPI:
         password: str,
         session: aiohttp.ClientSession,
         update_callback: Callable[[dict], Awaitable[None]] = None,
+        raw_xml_callback: Callable[[str], Awaitable[None]] = None,
+        raw_binary_callback: Callable[[bytes], Awaitable[None]] = None,
     ):
         """Initialize the API."""
         self.host = host
@@ -32,6 +34,8 @@ class TigersecuDVRAPI:
         self.password = password
         self._session = session
         self._update_callback = update_callback
+        self._raw_xml_callback = raw_xml_callback
+        self._raw_binary_callback = raw_binary_callback
         self._ws = None
         self._listen_task = None
         self._manager_task = None
@@ -53,6 +57,12 @@ class TigersecuDVRAPI:
             "Sensor": self._handle_sensor_event,
             "VideoInput": self._handle_video_input_event,
         }
+        # Seen but unhandled events:
+        # <Trigger Event="DateTime" Value="1764907307" TZ="TZ=STD08:00DST,M3.2.0/02:00,M11.1.0/02:00"/>
+        # <Trigger Event="ErrorAuthorization" Value="0"/>
+        # <Trigger Event="SrvFd" Fd="44"/>
+        # <Trigger Event="SendRemote" />
+        # <Trigger Event="Logout" User="admin" From="127.0.0.1"/>
 
     async def async_connect(self):
         """Establish and authenticate a persistent websocket connection."""
@@ -292,6 +302,9 @@ class TigersecuDVRAPI:
     def _process_binary_message(self, data: bytes):
         """Process a binary message from the websocket."""
         # The DVR sends a stream of messages, each prefixed with a 4-byte identifier.
+        if self._raw_binary_callback:
+            asyncio.create_task(self._raw_binary_callback(data))
+
         self._buffer += data
 
         while len(self._buffer) >= 4:
@@ -395,6 +408,10 @@ class TigersecuDVRAPI:
 
     def _process_xml_triggers(self, xml_string: str):
         """Parse XML triggers and dispatch them via the callback."""
+        if self._raw_xml_callback:
+            # Log the raw XML string for debugging purposes
+            asyncio.create_task(self._raw_xml_callback(xml_string))
+
         if not xml_string or not self._update_callback:
             return
 
@@ -504,23 +521,35 @@ class TigersecuDVRAPI:
     def _handle_disk_event(self, trigger: ET.Element):
         """Handle a disk status event."""
         # <Trigger Event="Disk" ID="0" Num="1" Model="WDC WD10PURX-64E" Status="Record" Flag="OVWR" Capacity="1000203091968" Available="75497472" Error="0"/>
-        # ID and Num are probably more clear if you have multiple disks; I don't.
-        # Status is a string like "Record" or "Idle".
+        # ID and Num likely differentiate a secondary disk.
+        # Status is a string like "Record" or "Idle"; just indicates whether the DVR is actually writing to this disk.
         # OVWR means overwrite mode is enabled; freeing up space by deleting old footage.
         self._emit({"event": "disk", "data": trigger.attrib})
 
     def _handle_login_event(self, trigger: ET.Element):
         """Handle a user login event."""
         # <Trigger Event="Login" User="admin" From="127.0.0.1"/>
+        # Indicates someone else has logged in.
         # From isn't usually the actual source IP.
         self._emit({"event": "login", "data": trigger.attrib})
 
     def _handle_network_event(self, trigger: ET.Element):
         """Handle a network status event."""
+        # <Trigger Event="Network" Link="True" IP="172.16.4.13" MAC="DE:AD:BE:EF:AA:55" DHCP_Gateway="172.16.4.1" DHCP_Netmask="255.255.255.0" GIP="1.1.1.1" SPD="100"/>
+        # Issued when you connect; probably gets reissued on DHCP renewals.
+        # GIP is your detected external IP address, via service on the DVR itself.
+        # SPD is the link speed in Mbps.
+        # Static network configuration might show up differently.
         self._emit({"event": "network", "data": trigger.attrib})
 
     def _handle_smart_event(self, trigger: ET.Element):
         """Handle a disk SMART status event."""
+        # <Trigger Event="SMART" ID="0" Num="1" Serial="NONE">
+        # <Attribute ID="1" Value="200" Worst="200" Thresh="51" RAW="070000000000"/>
+        # <Attribute ID="3" Value="125" Worst="123" Thresh="21" RAW="751200000000"/>
+        # ...and so on...
+        # ID and Num probably match the attributes in the Disk event.
+        # Each Attribute child contains SMART attribute data.
         try:
             disk_id = int(trigger.get("ID"))
             attributes = {}
@@ -540,6 +569,10 @@ class TigersecuDVRAPI:
 
     def _handle_scheme_event(self, trigger: ET.Element):
         """Handle a disk scheme event."""
+        # <Trigger Event="Scheme" ID="2"/>
+        # Indicates a change in the disk scheme, e.g., overwrite mode changed.
+        # Probably redundant with the Flag attribute in the Disk event, but this event usually
+        # is sent along with the Record events.
         try:
             scheme_id = int(trigger.get("ID"))
             self._emit({"event": "scheme", "id": scheme_id})
@@ -548,6 +581,10 @@ class TigersecuDVRAPI:
 
     def _handle_record_event(self, trigger: ET.Element):
         """Handle a record status event."""
+        # <Trigger Event="Record" ID="0" Type="None"/>
+        # <Trigger Event="Record" ID="1" Type="None"/>
+        # ...and so on for each channel -- all sent regularly every few seconds.
+        # Type is a string like None, Event (motion), or Conti (continuous). May be others.
         try:
             channel_id = int(trigger.get("ID"))
             record_type = trigger.get("Type")
@@ -563,6 +600,12 @@ class TigersecuDVRAPI:
 
     def _handle_video_input_event(self, trigger: ET.Element):
         """Handle a video input discovery event."""
+        # <Trigger Event="VideoInput" CH="0" Chip="RN6264" Format="NTSC"/>
+        # <Trigger Event="VideoInput" CH="1" Chip="RN6264" Format="NTSC"/>
+        # <Trigger Event="VideoInput" CH="2" Chip="RN6264" Format="NTSC"/>
+        # <Trigger Event="VideoInput" CH="3" Chip="RN6264" Format="NTSC"/>
+        # ...and so on for each channel.
+        # Usually sent just at the beginning of the connection. This is how we discover channels.
         try:
             channel_id = int(trigger.get("CH"))
             if channel_id not in self.channels:
