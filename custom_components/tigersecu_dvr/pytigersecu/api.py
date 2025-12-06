@@ -272,12 +272,6 @@ class TigersecuDVRAPI:
                         self._boundary = new_boundary.encode()
                         _LOGGER.debug("Updated multipart boundary: %s", self._boundary)
 
-                        # The boundary-defining emsg is followed by the first boundary string.
-                        # We need to find and consume it to sync the stream.
-                        first_boundary_pos = self._buffer.find(
-                            self._boundary, payload_start_pos
-                        )
-
                 if not self._boundary:
                     _LOGGER.error("No boundary defined, cannot process emsg payload.")
                     # Discard the message to avoid getting stuck
