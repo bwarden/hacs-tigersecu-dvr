@@ -41,6 +41,7 @@ class TigersecuDVRAPI:
         self._listen_task = None
         self._manager_task = None
         self._buffer = b""
+        self._desync_count = 0
         self._emsg_header = None  # To store the 64-byte emsg header
         self._boundary = None
         self.channels = []
@@ -261,9 +262,10 @@ class TigersecuDVRAPI:
                 # The first emsg defines the boundary for the multipart stream.
                 # We check for this case first.
                 header_str = header_bytes.decode("utf-8", errors="ignore")
+                headers = BytesParser().parsebytes(header_bytes)
+                content_type = headers.get("content-type")
+
                 if not self._boundary and "boundary=" in header_str:
-                    headers = BytesParser().parsebytes(header_bytes)
-                    content_type = headers.get("content-type")
                     if content_type:
                         # The boundary value in the header might be quoted
                         new_boundary = (
@@ -282,23 +284,14 @@ class TigersecuDVRAPI:
                             end_of_first_boundary = self._buffer.find(
                                 b"\n", first_boundary_pos
                             )
-                            if end_of_first_boundary != -1:
-                                self._buffer = self._buffer[end_of_first_boundary + 1 :]
-                                continue
 
-                # If we are here, this should be a data-carrying emsg.
-                # If we don't have a boundary yet, it's an error.
-                elif not self._boundary:
+                if not self._boundary:
                     _LOGGER.error("No boundary defined, cannot process emsg payload.")
                     # Discard the message to avoid getting stuck
                     self._buffer = self._buffer[payload_start_pos:]
                     continue
 
                 # The payload is terminated by the boundary.
-                # This part handles subsequent data-carrying emsg blocks.
-                headers = BytesParser().parsebytes(header_bytes)
-                content_type = headers.get("content-type")
-
                 boundary_pos = self._buffer.find(self._boundary, payload_start_pos)
                 if boundary_pos == -1:
                     _LOGGER.debug("Incomplete 'emsg' payload, waiting for more data.")
