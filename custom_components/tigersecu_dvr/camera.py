@@ -1,4 +1,5 @@
 """Camera platform for the Tigersecu DVR integration."""
+
 import logging
 
 from homeassistant.components.camera import Camera, CameraEntityFeature
@@ -25,9 +26,9 @@ async def async_setup_entry(
     dvr: TigersecuDVR = hass.data[DOMAIN][entry.entry_id]
 
     # Create a camera entity for each discovered channel
-    cameras = [
-        TigersecuCamera(dvr, channel_id) for channel_id in sorted(dvr.channels)
-    ]
+    cameras = [TigersecuCamera(dvr, channel_id) for channel_id in sorted(dvr.channels)]
+    if cameras:
+        _LOGGER.info("Adding %d camera entities", len(cameras))
     async_add_entities(cameras)
 
 
@@ -61,12 +62,15 @@ class TigersecuCamera(CoordinatorEntity[DataUpdateCoordinator], Camera):
     @property
     def is_recording(self) -> bool:
         """Return true if the camera is recording."""
-        return self.coordinator.data["channels"][self._channel_id].get("record_type") != "None"
+        return (
+            self.coordinator.data["channels"][self._channel_id].get("record_type")
+            != "None"
+        )
 
     async def stream_source(self) -> str | None:
         """Return the source of the stream."""
         return f"rtsp://{self._dvr.username}:{self._dvr.password}@{self._dvr.host}/main_{self._channel_id}?transport=tcp"
-    
+
     @property
     def use_stream_for_stills(self) -> bool:
         """Return True if the stream should be used for still images."""

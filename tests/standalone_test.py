@@ -17,6 +17,7 @@ Usage:
 The script will connect to the DVR, authenticate, and print any received
 XML data to the console. Press Ctrl+C to disconnect and exit gracefully.
 """
+
 import asyncio
 import logging
 import os
@@ -27,7 +28,9 @@ import aiohttp
 
 # Add the component's directory to the path so we can import the api module directly,
 # without triggering the import of Home Assistant modules from __init__.py.
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "custom_components/tigersecu_dvr"))
+sys.path.insert(
+    0, os.path.join(os.path.dirname(__file__), "../custom_components/tigersecu_dvr")
+)
 
 from api import TigersecuDVRAPI
 
@@ -35,6 +38,7 @@ from api import TigersecuDVRAPI
 async def on_data_received(event_data: dict):
     """Callback function to simply print received structured event data."""
     logging.info("--- EVENT DATA RECEIVED ---: %s", event_data)
+
 
 async def main():
     """Main function to run the standalone test."""
@@ -61,6 +65,7 @@ async def main():
         )
         await run_test(api)
 
+
 async def run_test(api: TigersecuDVRAPI):
     """Connect to the API and wait for shutdown signal."""
     shutdown_event = asyncio.Event()
@@ -76,11 +81,14 @@ async def run_test(api: TigersecuDVRAPI):
 
     try:
         await api.async_connect()
-        logging.info("Connection successful. Listening for messages... (Press Ctrl+C to exit)")
+        logging.info(
+            "Connection successful. Listening for messages... (Press Ctrl+C to exit)"
+        )
         await shutdown_event.wait()
     finally:
         await api.async_disconnect()
         logging.info("Disconnected from DVR.")
+
 
 if __name__ == "__main__":
     try:

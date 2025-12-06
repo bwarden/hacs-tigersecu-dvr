@@ -1,29 +1,23 @@
 import asyncio
 import logging
-from xml.etree import ElementTree as ET
 from datetime import timedelta
 
-import aiohttp
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.exceptions import ConfigEntryNotReady
-
-from .api import TigersecuDVRAPI
+from .pytigersecu import TigersecuDVRAPI
 
 _LOGGER = logging.getLogger(__name__)
 
 DOMAIN = "tigersecu_dvr"
+CHANNEL_DISCOVERY_MESSAGE_THRESHOLD = 10
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
-    """Set up Tigersecu DVR from a config entry."""
-    host = entry.data["host"]
-    username = entry.data["username"]
-    password = entry.data["password"]
-
     dvr = TigersecuDVR(hass, entry)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = dvr
 
@@ -83,6 +77,9 @@ class TigersecuDVR:
         self.password = entry.data["password"]
         self.channels = []
         self.initial_data_received = asyncio.Event()
+        self._async_add_binary_sensors: AddEntitiesCallback | None = None
+        self._created_sensor_ids = set()
+        self._message_count_since_connect = 0
 
         self.coordinator = DataUpdateCoordinator(
             hass,
@@ -96,6 +93,8 @@ class TigersecuDVR:
             "channels": {},
             "disks": {},
             "network": {},
+            "disk_scheme": None,
+            "sensors": {},
             "last_login": None,
         }
         self.api = TigersecuDVRAPI(
@@ -104,12 +103,34 @@ class TigersecuDVR:
             self.password,
             session=async_get_clientsession(hass),
             update_callback=self._handle_trigger_update,
+            raw_xml_callback=self._handle_raw_xml,
         )
 
     async def async_connect(self):
         """Connect to the DVR."""
-        # Initialize with empty data
+        # Reset counter on each new connection attempt
+        self._message_count_since_connect = 0
         await self.api.async_connect()
+
+    def set_binary_sensor_adder(self, async_add_entities: AddEntitiesCallback):
+        """Set the callback for adding binary sensors."""
+        self._async_add_binary_sensors = async_add_entities
+
+    @callback
+    async def _handle_raw_xml(self, xml_string: str):
+        """Handle raw XML to count messages for channel discovery check."""
+        self._message_count_since_connect += 1
+
+        if (
+            not self.channels
+            and self._message_count_since_connect > CHANNEL_DISCOVERY_MESSAGE_THRESHOLD
+        ):
+            _LOGGER.warning(
+                "No channels discovered after %d messages. Forcing reconnect.",
+                self._message_count_since_connect,
+            )
+            # This will trigger the reconnection logic in the API's manager task.
+            await self.api.async_disconnect()
 
     @callback
     async def _handle_trigger_update(self, trigger_data: dict):
@@ -253,6 +274,35 @@ class TigersecuDVR:
                     "raw": attr_data.get("RAW"),
                 }
             updated = True
+
+        elif event_type == "sensor":
+            sensor_id = trigger_data.get("sensor_id")
+            state = trigger_data.get("state")
+
+            # If this is the first time we see this sensor, create the entity.
+            if (
+                sensor_id not in self._created_sensor_ids
+                and self._async_add_binary_sensors
+            ):
+                _LOGGER.info("Adding 1 new alarm sensor entity (ID: %s)", sensor_id)
+                # Import here to avoid circular dependency
+                from .binary_sensor import TigersecuAlarmSensor
+
+                new_sensor = TigersecuAlarmSensor(self, sensor_id)
+                self._async_add_binary_sensors([new_sensor])
+                self._created_sensor_ids.add(sensor_id)
+                # Initialize state
+                current_data["sensors"][sensor_id] = not state
+
+            if current_data["sensors"].get(sensor_id) != state:
+                current_data["sensors"][sensor_id] = state
+                updated = True
+
+        elif event_type == "scheme":
+            scheme_id = trigger_data.get("id")
+            if current_data["disk_scheme"] != scheme_id:
+                current_data["disk_scheme"] = scheme_id
+                updated = True
 
         if updated:
             self.coordinator.async_set_updated_data(self.coordinator.data)
