@@ -9,8 +9,6 @@ from email.parser import BytesParser
 from xml.etree import ElementTree as ET
 
 import aiohttp
-from aiohttp.hdrs import METH_GET
-from multidict import CIMultiDict
 
 _LOGGER = logging.getLogger(__name__)
 MESSAGE_TIMEOUT = 60.0
@@ -279,11 +277,6 @@ class TigersecuDVRAPI:
                         first_boundary_pos = self._buffer.find(
                             self._boundary, payload_start_pos
                         )
-                        if first_boundary_pos != -1:
-                            # Consume up to the end of the boundary line
-                            end_of_first_boundary = self._buffer.find(
-                                b"\n", first_boundary_pos
-                            )
 
                 if not self._boundary:
                     _LOGGER.error("No boundary defined, cannot process emsg payload.")

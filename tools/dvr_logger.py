@@ -14,7 +14,7 @@ library_path = os.path.abspath(
 )
 sys.path.insert(0, library_path)
 
-from pytigersecu import TigersecuDVRAPI
+from pytigersecu import TigersecuDVRAPI  # noqa: E402
 
 _LOGGER = logging.getLogger(__name__)
 
