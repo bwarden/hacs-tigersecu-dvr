@@ -4,6 +4,10 @@
 
 This custom component integrates [Tigersecu](https://www.tigersecu.com/) Digital Video Recorders (DVRs) into Home Assistant. It connects to the DVR's websocket interface to provide real-time status updates and camera streams.
 
+## Supported Hardware
+
+[Tigersecu DVR models](https://www.tigersecu.com/firmware-upgrading/) I have only tested this successfully on my model 16CH (E_IV_HB) DVR. It *might* work on other Nova Super HD DVRs, *maybe* on H.264 Super HD DVRs, but will almost certainly **not** support the Tuya-based models.
+
 ## Features
 
 *   **Camera Streams**: Creates a camera entity for each channel on the DVR, providing a live RTSP stream.
