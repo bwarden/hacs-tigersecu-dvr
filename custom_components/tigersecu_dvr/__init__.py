@@ -329,7 +329,7 @@ class TigersecuDVR:
                     current_data["system"]["time_sync_problem"] = is_problem
                     updated = True
 
-            except (ValueError, TypeError) as e:
+            except (ValueError, TypeError):
                 _LOGGER.error("Could not parse DateTime event value: %s", trigger_data)
 
         if updated:
