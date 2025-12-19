@@ -60,6 +60,7 @@ This integration will create a device in Home Assistant representing your DVR. T
 *   **Motion**: A binary sensor for each channel that turns `on` when motion is detected.
 *   **Video Loss**: A binary sensor for each channel that turns `on` when the video signal is lost. This will also mark the corresponding camera entity as unavailable.
 *   **External Alarm**: (Optional) A binary sensor for each external alarm input that turns `on` when triggered. These are created dynamically if detected.
+*   **Time Sync Problem**: (Diagnostic, disabled by default) A binary sensor that turns `on` if the DVR's clock is out of sync with Home Assistant's clock.
 
 ### Sensors
 

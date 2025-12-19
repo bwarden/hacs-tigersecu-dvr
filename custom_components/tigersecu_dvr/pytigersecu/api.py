@@ -56,9 +56,9 @@ class TigersecuDVRAPI:
             "Scheme": self._handle_scheme_event,
             "Sensor": self._handle_sensor_event,
             "VideoInput": self._handle_video_input_event,
+            "DateTime": self._handle_datetime_event,
         }
         # Seen but unhandled events:
-        # <Trigger Event="DateTime" Value="1764907307" TZ="TZ=STD08:00DST,M3.2.0/02:00,M11.1.0/02:00"/>
         # <Trigger Event="ErrorAuthorization" Value="0"/>
         # <Trigger Event="SrvFd" Fd="44"/>
         # <Trigger Event="SendRemote" />
@@ -546,3 +546,12 @@ class TigersecuDVRAPI:
             self._emit({"event": "video_input", "data": trigger.attrib})
         except (ValueError, KeyError):
             _LOGGER.warning("Received invalid VideoInput event: %s", trigger.attrib)
+
+    def _handle_datetime_event(self, trigger: ET.Element):
+        """Handle a DateTime event."""
+        # <Trigger Event="DateTime" Value="1764907307" TZ="..."/>
+        try:
+            timestamp = int(trigger.get("Value"))
+            self._emit({"event": "datetime", "timestamp": timestamp})
+        except (ValueError, KeyError, TypeError):
+            _LOGGER.warning("Received invalid DateTime event: %s", trigger.attrib)
