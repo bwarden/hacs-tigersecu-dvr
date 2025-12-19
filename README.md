@@ -91,3 +91,26 @@ If you have trouble connecting, ensure:
 *   There are no firewalls blocking the connection to the DVR's web port (usually port 80).
 
 If channels are not discovered, the integration will attempt to reconnect. Check the Home Assistant logs for any error messages from the `pytigersecu` library or the `tigersecu_dvr` integration.
+
+## DVR Events
+
+The integration listens for the following event types from the DVR's websocket.
+
+| Event Type           | Handled | Associated Entities / Purpose                                                              |
+|----------------------|---------|--------------------------------------------------------------------------------------------|
+| `DateTime`           | Yes     | `binary_sensor.time_sync_problem`                                                          |
+| `Disk`               | Yes     | `sensor.disk_X_model`, `sensor.disk_X_status`, `sensor.disk_X_capacity`, `sensor.disk_X_available` |
+| `Login`              | Yes     | `sensor.last_login`                                                                        |
+| `Motion`             | Yes     | `binary_sensor.motion_chXX`                                                                |
+| `Network`            | Yes     | `sensor.ip_address`, `sensor.mac_address`, `sensor.gateway`, `sensor.external_ip`, `sensor.link_speed` |
+| `Record`             | Yes     | `camera.chXX` (is_recording attribute)                                                     |
+| `Scheme`             | Yes     | `sensor.disk_scheme`                                                                       |
+| `Sensor`             | Yes     | `binary_sensor.sensor_X` (dynamically created)                                             |
+| `SMART`              | Yes     | `sensor.disk_X_smart_Y`                                                                    |
+| `VideoInput`         | Yes     | `camera.chXX` (discovery)                                                                  |
+| `VLOSS`              | Yes     | `binary_sensor.video_loss_chXX`, `camera.chXX` (availability)                              |
+| `ConfigChange`       | No      | -                                                                                          |
+| `ErrorAuthorization` | No      | -                                                                                          |
+| `Logout`             | No      | -                                                                                          |
+| `SendRemote`         | No      | -                                                                                          |
+| `SrvFd`              | No      | -                                                                                          |
