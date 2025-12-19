@@ -2,6 +2,8 @@
 
 import logging
 
+from yarl import URL
+
 from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -69,7 +71,16 @@ class TigersecuCamera(CoordinatorEntity[DataUpdateCoordinator], Camera):
 
     async def stream_source(self) -> str | None:
         """Return the source of the stream."""
-        return f"rtsp://{self._dvr.username}:{self._dvr.password}@{self._dvr.host}/main_{self._channel_id}?transport=tcp"
+        return str(
+            URL.build(
+                scheme="rtsp",
+                user=self._dvr.username,
+                password=self._dvr.password,
+                host=self._dvr.host,
+                path=f"/main_{self._channel_id}",
+                query={"transport": "tcp"},
+            )
+        )
 
     @property
     def use_stream_for_stills(self) -> bool:
