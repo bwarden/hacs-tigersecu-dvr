@@ -33,7 +33,10 @@ async def async_setup_entry(
         sensors.append(TigersecuMotionSensor(dvr, channel_id))
         sensors.append(TigersecuVlossSensor(dvr, channel_id))
 
-    async_add_entities(sensors)
+    # Add the time sync sensor
+    sensors.append(TimeSyncProblemSensor(dvr))
+
+    async_add_entities(sensors, True)
 
     # Set the callback for dynamically adding alarm sensors later
     dvr.set_binary_sensor_adder(async_add_entities)
@@ -106,3 +109,27 @@ class TigersecuAlarmSensor(CoordinatorEntity, BinarySensorEntity):
     def is_on(self) -> bool:
         """Return true if the sensor is active."""
         return self.coordinator.data.get("sensors", {}).get(self._sensor_id, False)
+
+
+class TimeSyncProblemSensor(CoordinatorEntity, BinarySensorEntity):
+    """A binary sensor to indicate a time synchronization problem."""
+
+    _attr_has_entity_name = True
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+    _attr_name = "Time Sync Problem"
+
+    def __init__(self, dvr: "TigersecuDVR") -> None:
+        """Initialize the sensor."""
+        super().__init__(dvr.coordinator)
+        self._dvr = dvr
+        self._attr_unique_id = f"{self._dvr.entry.entry_id}_time_sync_problem"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, self._dvr.entry.entry_id)},
+        }
+
+    @property
+    def is_on(self) -> bool:
+        """Return true if there is a time sync problem."""
+        return self.coordinator.data.get("system", {}).get("time_sync_problem", False)

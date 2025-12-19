@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from datetime import timedelta
 
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -81,10 +82,16 @@ class TigersecuDVR:
         self._created_sensor_ids = set()
         self._message_count_since_connect = 0
 
+        async def _async_update_data():
+            """Update method for the coordinator (noop)."""
+            # Data is pushed from the websocket, so we don't need to poll.
+            return self.coordinator.data
+
         self.coordinator = DataUpdateCoordinator(
             hass,
             _LOGGER,
             name=f"{DOMAIN} ({self.host})",
+            update_method=_async_update_data,
             # The websocket pushes updates, so we don't need polling.
             update_interval=timedelta(days=365),
         )
@@ -95,6 +102,7 @@ class TigersecuDVR:
             "network": {},
             "disk_scheme": None,
             "sensors": {},
+            "system": {"time_sync_problem": False},
             "last_login": None,
         }
         self.api = TigersecuDVRAPI(
@@ -303,6 +311,26 @@ class TigersecuDVR:
             if current_data["disk_scheme"] != scheme_id:
                 current_data["disk_scheme"] = scheme_id
                 updated = True
+
+        elif event_type == "datetime":
+            try:
+                dvr_timestamp = trigger_data.get("timestamp")
+                local_timestamp = int(time.time())
+                time_diff = abs(dvr_timestamp - local_timestamp)
+
+                is_problem = time_diff > 10
+                if is_problem and not current_data["system"].get("time_sync_problem"):
+                    _LOGGER.warning(
+                        "DVR time is out of sync by %d seconds.",
+                        time_diff,
+                    )
+
+                if current_data["system"]["time_sync_problem"] != is_problem:
+                    current_data["system"]["time_sync_problem"] = is_problem
+                    updated = True
+
+            except (ValueError, TypeError):
+                _LOGGER.error("Could not parse DateTime event value: %s", trigger_data)
 
         if updated:
             self.coordinator.async_set_updated_data(self.coordinator.data)

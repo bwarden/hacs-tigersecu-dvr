@@ -56,13 +56,40 @@ class TigersecuDVRAPI:
             "Scheme": self._handle_scheme_event,
             "Sensor": self._handle_sensor_event,
             "VideoInput": self._handle_video_input_event,
+            "DateTime": self._handle_datetime_event,
         }
-        # Seen but unhandled events:
-        # <Trigger Event="DateTime" Value="1764907307" TZ="TZ=STD08:00DST,M3.2.0/02:00,M11.1.0/02:00"/>
+
+        # Handled Events:
+        # <Trigger Event="DateTime" Value="1764907307" TZ="..."/>
+        # <Trigger Event="Disk" ID="0" Num="1" Model="WDC WD10PURX-64E" Status="Record" Flag="OVWR" Capacity="1000203091968" Available="75497472" Error="0"/>
+        # <Trigger Event="Login" User="admin" From="127.0.0.1"/>
+        # <Trigger Event="Motion" Value="525" Status="17407"/>
+        # <Trigger Event="Network" Link="True" IP="172.16.4.13" MAC="DE:AD:BE:EF:AA:55" DHCP_Gateway="172.16.4.1" DHCP_Netmask="255.255.255.0" GIP="1.1.1.1" SPD="100"/>
+        # <Trigger Event="Record" ID="0" Type="None"/>
+        # <Trigger Event="Scheme" ID="2"/>
+        # <Trigger Event="Sensor" Value="5" Status="0"/>
+        # <Trigger Event="SMART" ID="0" Num="1" Serial="NONE">
+        #   <Attribute ID="1" Value="200" Worst="200" Thresh="51" RAW="070000000000"/>
+        #   ...
+        # </Trigger>
+        # <Trigger Event="VideoInput" CH="0" Chip="RN6264" Format="NTSC"/>
+        # <Trigger Event="VLOSS" Value="23552" Status="24576"/>
+
+        # Seen but Unhandled Events:
+        # <Trigger Event="ConfigChange" Value="service.xml"/>
+        #   - Indicates a configuration file on the DVR has changed.
+        #
         # <Trigger Event="ErrorAuthorization" Value="0"/>
-        # <Trigger Event="SrvFd" Fd="44"/>
-        # <Trigger Event="SendRemote" />
+        #   - Seen on failed login. The connection is dropped, so no specific handling is needed.
+        #
         # <Trigger Event="Logout" User="admin" From="127.0.0.1"/>
+        #   - Indicates a user logged out from the web UI.
+        #
+        # <Trigger Event="SendRemote" />
+        #   - Purpose unknown.
+        #
+        # <Trigger Event="SrvFd" Fd="44"/>
+        #   - Purpose unknown, seems to be an internal file descriptor.
 
     async def async_connect(self):
         """Establish and authenticate a persistent websocket connection."""
@@ -386,7 +413,7 @@ class TigersecuDVRAPI:
         if handler:
             handler(trigger)
         else:
-            _LOGGER.debug("No handler for event type '%s'", event_type)
+            _LOGGER.debug("No handler for event type '%s'; ignoring.", event_type)
 
     def _emit(self, data: dict):
         """Emit data via the callback."""
@@ -546,3 +573,12 @@ class TigersecuDVRAPI:
             self._emit({"event": "video_input", "data": trigger.attrib})
         except (ValueError, KeyError):
             _LOGGER.warning("Received invalid VideoInput event: %s", trigger.attrib)
+
+    def _handle_datetime_event(self, trigger: ET.Element):
+        """Handle a DateTime event."""
+        # <Trigger Event="DateTime" Value="1764907307" TZ="..."/>
+        try:
+            timestamp = int(trigger.get("Value"))
+            self._emit({"event": "datetime", "timestamp": timestamp})
+        except (ValueError, KeyError, TypeError):
+            _LOGGER.warning("Received invalid DateTime event: %s", trigger.attrib)
