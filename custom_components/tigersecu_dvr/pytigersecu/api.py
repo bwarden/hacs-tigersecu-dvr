@@ -386,7 +386,7 @@ class TigersecuDVRAPI:
         if handler:
             handler(trigger)
         else:
-            _LOGGER.debug("No handler for event type '%s'", event_type)
+            _LOGGER.debug("No handler for event type '%s'; ignoring.", event_type)
 
     def _emit(self, data: dict):
         """Emit data via the callback."""
