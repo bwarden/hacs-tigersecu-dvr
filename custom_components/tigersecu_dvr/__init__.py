@@ -11,6 +11,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.exceptions import ConfigEntryNotReady
 from .pytigersecu import TigersecuDVRAPI
+from .const import CONF_RTSP_TIMEOUT, DEFAULT_RTSP_TIMEOUT
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -76,6 +77,7 @@ class TigersecuDVR:
         self.host = entry.data["host"]
         self.username = entry.data["username"]
         self.password = entry.data["password"]
+        self.rtsp_timeout = entry.data.get(CONF_RTSP_TIMEOUT, DEFAULT_RTSP_TIMEOUT)
         self.channels = []
         self.initial_data_received = asyncio.Event()
         self._async_add_binary_sensors: AddEntitiesCallback | None = None

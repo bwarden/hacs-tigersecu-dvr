@@ -13,7 +13,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .pytigersecu import TigersecuDVRAPI
-from .const import DOMAIN
+from .const import CONF_RTSP_TIMEOUT, DEFAULT_RTSP_TIMEOUT, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -22,6 +22,7 @@ DATA_SCHEMA = vol.Schema(
         vol.Required(CONF_HOST): str,
         vol.Required(CONF_USERNAME): str,
         vol.Required(CONF_PASSWORD): str,
+        vol.Optional(CONF_RTSP_TIMEOUT, default=DEFAULT_RTSP_TIMEOUT): int,
     }
 )
 

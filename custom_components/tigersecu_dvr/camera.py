@@ -79,6 +79,7 @@ class TigersecuCamera(CoordinatorEntity[DataUpdateCoordinator], Camera):
                 host=self._dvr.host,
                 path=f"/main_{self._channel_id}",
                 query={"transport": "tcp"},
+                fragment=f"timeout={self._dvr.rtsp_timeout}",
             )
         )
 
