@@ -69,3 +69,45 @@ class TigersecuDVRConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="user", data_schema=DATA_SCHEMA, errors=errors
         )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Handle the reconfiguration step."""
+        errors = {}
+        entry = self._get_reconfigure_entry()
+
+        if user_input is not None:
+            if entry.state == config_entries.ConfigEntryState.LOADED:
+                await self.hass.config_entries.async_unload(entry.entry_id)
+
+            try:
+                await validate_input(self.hass, user_input)
+            except (aiohttp.ClientError, ConnectionError):
+                errors["base"] = "cannot_connect"
+                await self.hass.config_entries.async_reload(entry.entry_id)
+            except Exception:  # pylint: disable=broad-except
+                _LOGGER.exception("Unexpected exception")
+                errors["base"] = "unknown"
+                await self.hass.config_entries.async_reload(entry.entry_id)
+            else:
+                return self.async_update_reload_and_abort(
+                    entry,
+                    data=user_input,
+                )
+
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_HOST, default=entry.data[CONF_HOST]): str,
+                vol.Required(CONF_USERNAME, default=entry.data[CONF_USERNAME]): str,
+                vol.Required(CONF_PASSWORD, default=entry.data[CONF_PASSWORD]): str,
+                vol.Optional(
+                    CONF_RTSP_TIMEOUT,
+                    default=entry.data.get(CONF_RTSP_TIMEOUT, DEFAULT_RTSP_TIMEOUT),
+                ): int,
+            }
+        )
+
+        return self.async_show_form(
+            step_id="reconfigure", data_schema=schema, errors=errors
+        )

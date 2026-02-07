@@ -9,6 +9,15 @@
           "username": "Username",
           "password": "Password"
         }
+      },
+      "reconfigure": {
+        "title": "Reconfigure Tigersecu DVR",
+        "description": "Update the connection details for your DVR.",
+        "data": {
+          "host": "Host",
+          "username": "Username",
+          "password": "Password"
+        }
       }
     },
     "error": {
@@ -16,7 +25,8 @@
       "unknown": "An unknown error occurred."
     },
     "abort": {
-      "already_configured": "This DVR is already configured."
+      "already_configured": "This DVR is already configured.",
+      "reconfigure_successful": "Re-configuration was successful"
     }
   }
 }
