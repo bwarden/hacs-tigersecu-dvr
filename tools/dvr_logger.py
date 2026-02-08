@@ -14,7 +14,7 @@ library_path = os.path.abspath(
 )
 sys.path.insert(0, library_path)
 
-from pytigersecu import TigersecuDVRAPI  # noqa: E402
+from pytigersecu import AuthenticationError, TigersecuDVRAPI  # noqa: E402
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -128,10 +128,13 @@ async def main():
     )
 
     try:
+        await api.async_validate_connection()
         await api.async_connect()
         _LOGGER.info("Connected to DVR. Logging messages...")
         # Keep the script running indefinitely
         await asyncio.Event().wait()
+    except AuthenticationError:
+        _LOGGER.error("Authentication failed. Please check your username and password.")
     except ConnectionError as e:
         _LOGGER.error("Failed to connect to DVR: %s", e)
     except asyncio.CancelledError:

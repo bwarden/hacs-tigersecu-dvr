@@ -9,8 +9,8 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
-from homeassistant.exceptions import ConfigEntryNotReady
-from .pytigersecu import TigersecuDVRAPI
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from .pytigersecu import AuthenticationError, TigersecuDVRAPI
 from .const import CONF_RTSP_TIMEOUT, DEFAULT_RTSP_TIMEOUT
 
 _LOGGER = logging.getLogger(__name__)
@@ -25,14 +25,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
 
     try:
         await dvr.async_connect()
+    except AuthenticationError as err:
+        raise ConfigEntryAuthFailed(f"Authentication failed: {err}") from err
     except ConnectionError as err:
         raise ConfigEntryNotReady(f"Failed to connect to DVR: {err}") from err
 
     # Wait for the websocket to confirm it is connected and authenticated.
-    try:
-        await asyncio.wait_for(dvr.api.connected.wait(), timeout=10)
-    except asyncio.TimeoutError as err:
-        raise ConfigEntryNotReady("Connection to DVR timed out") from err
+    # We also monitor the manager task in case it fails (e.g. Auth Error) before connecting.
+    connect_task = asyncio.create_task(dvr.api.connected.wait())
+    manager_task = dvr.api._manager_task
+
+    done, pending = await asyncio.wait(
+        [connect_task, manager_task],
+        return_when=asyncio.FIRST_COMPLETED,
+        timeout=10,
+    )
+
+    if connect_task in done:
+        # Connection successful
+        pass
+    elif manager_task in done:
+        # The manager task finished, which means it encountered a fatal error (like Auth failure)
+        connect_task.cancel()
+        raise ConfigEntryAuthFailed("Authentication failed")
+    else:
+        # Timeout
+        for task in pending:
+            task.cancel()
+        await dvr.api.async_disconnect()
+        raise ConfigEntryNotReady("Connection to DVR timed out")
 
     # Wait for the initial data (like camera channels) to be populated
     try:

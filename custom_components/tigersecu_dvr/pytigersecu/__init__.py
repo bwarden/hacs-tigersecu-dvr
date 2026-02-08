@@ -1,3 +1,3 @@
 """A Python library for communicating with Tigersecu DVRs."""
 
-from .api import TigersecuDVRAPI as TigersecuDVRAPI
+from .api import AuthenticationError, TigersecuDVRAPI
