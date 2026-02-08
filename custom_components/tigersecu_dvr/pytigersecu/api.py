@@ -369,12 +369,35 @@ class TigersecuDVRAPI:
                 continue
 
             # If we get here, we have an unknown prefix.
-            _LOGGER.warning(
-                "Unknown message prefix '%s', discarding one byte and retrying. Buffer: %s",
+            if self._boundary:
+                boundary_pos = self._buffer.find(self._boundary)
+                if boundary_pos != -1:
+                    end_of_boundary = self._buffer.find(b"\r\n", boundary_pos)
+                    if end_of_boundary != -1:
+                        _LOGGER.warning(
+                            "Unknown message prefix '%s'. Resyncing to MIME boundary at %d.",
+                            prefix,
+                            boundary_pos,
+                        )
+                        self._buffer = self._buffer[end_of_boundary + 2 :]
+                        continue
+
+                    if boundary_pos > 0:
+                        _LOGGER.warning(
+                            "Unknown message prefix '%s'. Found boundary at %d, discarding preceding bytes.",
+                            prefix,
+                            boundary_pos,
+                        )
+                        self._buffer = self._buffer[boundary_pos:]
+
+                    return
+
+            _LOGGER.error(
+                "Unknown message prefix '%s' and no boundary set. Disconnecting. Buffer: %s",
                 prefix,
                 self._buffer[:32].hex(),
             )
-            self._buffer = self._buffer[1:]
+            raise ConnectionError(f"Unknown message prefix '{prefix}'")
 
     def _parse_boundary_from_emsg(self, emsg_data: str):
         """Extract the multipart boundary from the initial emsg payload."""
