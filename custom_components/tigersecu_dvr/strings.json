@@ -18,15 +18,26 @@
           "username": "Username",
           "password": "Password"
         }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate Tigersecu DVR",
+        "description": "Please update the password for your DVR.",
+        "data": {
+          "host": "Host",
+          "username": "Username",
+          "password": "Password"
+        }
       }
     },
     "error": {
       "cannot_connect": "Failed to connect. Please check the host and credentials.",
+      "invalid_auth": "Invalid authentication credentials.",
       "unknown": "An unknown error occurred."
     },
     "abort": {
       "already_configured": "This DVR is already configured.",
-      "reconfigure_successful": "Re-configuration was successful"
+      "reconfigure_successful": "Re-configuration was successful",
+      "reauth_successful": "Re-authentication was successful"
     }
   }
 }

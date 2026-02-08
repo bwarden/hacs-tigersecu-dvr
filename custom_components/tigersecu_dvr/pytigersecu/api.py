@@ -14,6 +14,10 @@ _LOGGER = logging.getLogger(__name__)
 MESSAGE_TIMEOUT = 60.0
 
 
+class AuthenticationError(Exception):
+    """Exception raised for authentication failures."""
+
+
 class TigersecuDVRAPI:
     """A class to communicate with the Tigersecu DVR."""
 
@@ -38,6 +42,7 @@ class TigersecuDVRAPI:
         self._ws = None
         self._listen_task = None
         self._manager_task = None
+        self._authenticated = False
         self._buffer = b""
         self._desync_count = 0
         self._emsg_header = None  # To store the 64-byte emsg header
@@ -114,12 +119,19 @@ class TigersecuDVRAPI:
             )
             # Just send the auth string. If it's invalid, the DVR will close the connection.
             await ws.send_str(f"Basic {auth_str}")
-            # Wait briefly to see if the connection is rejected.
-            await asyncio.sleep(1)
-            if ws.closed:
-                raise ConnectionError(
-                    "Connection rejected by DVR after authentication."
-                )
+
+            # Try to read a message to confirm connection is accepted.
+            try:
+                msg = await ws.receive(timeout=5)
+                if msg.type in (
+                    aiohttp.WSMsgType.CLOSE,
+                    aiohttp.WSMsgType.CLOSED,
+                    aiohttp.WSMsgType.ERROR,
+                ):
+                    raise AuthenticationError("Connection rejected by DVR.")
+            except asyncio.TimeoutError:
+                if ws.closed:
+                    raise AuthenticationError("Connection rejected by DVR (timeout).")
 
         finally:
             if ws and not ws.closed:
@@ -127,6 +139,7 @@ class TigersecuDVRAPI:
 
     async def _connect_internal(self):
         _LOGGER.debug("Connecting to websocket at wss://%s/streaming", self.host)
+        self._authenticated = False
         url = f"wss://{self.host}/streaming"
         auth_str = base64.b64encode(f"{self.username}:{self.password}".encode()).decode(
             "ascii"
@@ -149,6 +162,27 @@ class TigersecuDVRAPI:
         auth_message = f"Basic {auth_str}"
         self._auth_message = auth_message
         await self._ws.send_str(auth_message)
+
+        # Reset buffer for the new connection
+        self._buffer = b""
+
+        # Validate auth by reading the first message
+        try:
+            msg = await self._ws.receive(timeout=5)
+            if msg.type in (
+                aiohttp.WSMsgType.CLOSE,
+                aiohttp.WSMsgType.CLOSED,
+                aiohttp.WSMsgType.ERROR,
+            ):
+                if not self._authenticated:
+                    raise AuthenticationError("Authentication failed")
+
+            if msg.type == aiohttp.WSMsgType.BINARY:
+                self._process_binary_message(msg.data)
+        except asyncio.TimeoutError:
+            if self._ws.closed and not self._authenticated:
+                raise AuthenticationError("Authentication failed")
+            # If open, we just timed out waiting for the first message. Proceed to listen.
 
         self.connected.set()
         _LOGGER.debug("Authentication successful in _connect_internal.")
@@ -179,6 +213,9 @@ class TigersecuDVRAPI:
                 backoff_time = 1  # Reset backoff on successful connection
                 await self._listen()  # This will run until the connection is lost
 
+            except AuthenticationError:
+                _LOGGER.error("Authentication failed. Aborting connection attempts.")
+                break
             except (aiohttp.ClientError, ConnectionError, asyncio.TimeoutError) as err:
                 _LOGGER.warning(
                     "Connection to DVR lost: %s. Reconnecting in %d seconds.",
@@ -200,7 +237,6 @@ class TigersecuDVRAPI:
     async def _listen(self):
         """Listen for incoming messages from the websocket."""
         _LOGGER.debug("Websocket listener started")
-        self._buffer = b""
 
         while not self._ws.closed:
             try:
@@ -222,6 +258,10 @@ class TigersecuDVRAPI:
                 aiohttp.WSMsgType.CLOSED,
                 aiohttp.WSMsgType.ERROR,
             ):
+                if not self._authenticated:
+                    raise AuthenticationError(
+                        "Connection closed without valid message (Authentication Failed)"
+                    )
                 raise ConnectionError(
                     f"Websocket connection closed or errored: {msg.type}"
                 )
@@ -248,11 +288,13 @@ class TigersecuDVRAPI:
 
             if prefix == "wsev":
                 _LOGGER.debug("Received 'wsev' acknowledgment.")
+                self._authenticated = True
                 # This is just an acknowledgment. Consume the 4 bytes and continue processing.
                 self._buffer = self._buffer[4:]
                 continue
 
             if prefix == "emsg":
+                self._authenticated = True
                 # An 'emsg' is followed by 64 bytes of binary data, then the text payload.
                 if len(self._buffer) < 68:  # 4 bytes for 'emsg' + 64 bytes for header
                     _LOGGER.debug(
