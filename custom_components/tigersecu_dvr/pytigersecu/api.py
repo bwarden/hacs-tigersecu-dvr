@@ -372,14 +372,32 @@ class TigersecuDVRAPI:
             if self._boundary:
                 boundary_pos = self._buffer.find(self._boundary)
                 if boundary_pos != -1:
-                    end_of_boundary = self._buffer.find(b"\r\n", boundary_pos)
+                    # Limit the search to avoid skipping into the next message's header
+                    search_limit = boundary_pos + len(self._boundary) + 20
+                    end_of_boundary = self._buffer.find(
+                        b"\r\n", boundary_pos, search_limit
+                    )
+
                     if end_of_boundary != -1:
                         _LOGGER.warning(
-                            "Unknown message prefix '%s'. Resyncing to MIME boundary at %d.",
+                            "Unknown message prefix '%s'. Resyncing to MIME boundary at %d. Buffer: %s",
                             prefix,
                             boundary_pos,
+                            self._buffer[:100],
                         )
                         self._buffer = self._buffer[end_of_boundary + 2 :]
+                        continue
+
+                    if len(self._buffer) > search_limit:
+                        _LOGGER.warning(
+                            "Unknown message prefix '%s'. Resyncing to MIME boundary at %d (no CRLF). Buffer: %s",
+                            prefix,
+                            boundary_pos,
+                            self._buffer[:100],
+                        )
+                        self._buffer = self._buffer[
+                            boundary_pos + len(self._boundary) :
+                        ]
                         continue
 
                     if boundary_pos > 0:
