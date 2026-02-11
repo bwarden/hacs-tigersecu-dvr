@@ -373,7 +373,7 @@ class TigersecuDVRAPI:
                 boundary_pos = self._buffer.find(self._boundary)
                 if boundary_pos != -1:
                     # Limit the search to avoid skipping into the next message's header
-                    search_limit = boundary_pos + len(self._boundary) + 20
+                    search_limit = boundary_pos + len(self._boundary) + 4
                     end_of_boundary = self._buffer.find(
                         b"\r\n", boundary_pos, search_limit
                     )
