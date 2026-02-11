@@ -3,6 +3,7 @@ import logging
 import time
 from datetime import timedelta
 
+from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from homeassistant.config_entries import ConfigEntry
@@ -107,9 +108,9 @@ class TigersecuDVR:
         """Initialize the DVR connection."""
         self.hass = hass
         self.entry = entry
-        self.host = entry.data["host"]
-        self.username = entry.data["username"]
-        self.password = entry.data["password"]
+        self.host = entry.options.get(CONF_HOST, entry.data[CONF_HOST])
+        self.username = entry.options.get(CONF_USERNAME, entry.data[CONF_USERNAME])
+        self.password = entry.options.get(CONF_PASSWORD, entry.data[CONF_PASSWORD])
         self.rtsp_timeout = entry.options.get(
             CONF_RTSP_TIMEOUT, entry.data.get(CONF_RTSP_TIMEOUT, DEFAULT_RTSP_TIMEOUT)
         )
