@@ -14,7 +14,13 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .pytigersecu import AuthenticationError, TigersecuDVRAPI
-from .const import CONF_RTSP_TIMEOUT, DEFAULT_RTSP_TIMEOUT, DOMAIN
+from .const import (
+    CONF_RTSP_TIMEOUT,
+    DEFAULT_RTSP_TIMEOUT,
+    CONF_STILL_IMAGE_TIMEOUT,
+    DEFAULT_STILL_IMAGE_TIMEOUT,
+    DOMAIN,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -24,6 +30,9 @@ DATA_SCHEMA = vol.Schema(
         vol.Required(CONF_USERNAME): str,
         vol.Required(CONF_PASSWORD): str,
         vol.Optional(CONF_RTSP_TIMEOUT, default=DEFAULT_RTSP_TIMEOUT): int,
+        vol.Optional(
+            CONF_STILL_IMAGE_TIMEOUT, default=DEFAULT_STILL_IMAGE_TIMEOUT
+        ): int,
     }
 )
 
@@ -49,6 +58,14 @@ class TigersecuDVRConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
+    @staticmethod
+    @config_entries.callback
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> config_entries.OptionsFlow:
+        """Create the options flow."""
+        return TigersecuDVROptionsFlow(config_entry)
+
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
@@ -73,51 +90,6 @@ class TigersecuDVRConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="user", data_schema=DATA_SCHEMA, errors=errors
         )
 
-    async def async_step_reconfigure(
-        self, user_input: dict[str, Any] | None = None
-    ) -> config_entries.ConfigFlowResult:
-        """Handle the reconfiguration step."""
-        errors = {}
-        entry = self._get_reconfigure_entry()
-
-        if user_input is not None:
-            if entry.state == config_entries.ConfigEntryState.LOADED:
-                await self.hass.config_entries.async_unload(entry.entry_id)
-
-            try:
-                await validate_input(self.hass, user_input)
-            except AuthenticationError:
-                errors["base"] = "invalid_auth"
-                await self.hass.config_entries.async_reload(entry.entry_id)
-            except (aiohttp.ClientError, ConnectionError):
-                errors["base"] = "cannot_connect"
-                await self.hass.config_entries.async_reload(entry.entry_id)
-            except Exception:  # pylint: disable=broad-except
-                _LOGGER.exception("Unexpected exception")
-                errors["base"] = "unknown"
-                await self.hass.config_entries.async_reload(entry.entry_id)
-            else:
-                return self.async_update_reload_and_abort(
-                    entry,
-                    data=user_input,
-                )
-
-        schema = vol.Schema(
-            {
-                vol.Required(CONF_HOST, default=entry.data[CONF_HOST]): str,
-                vol.Required(CONF_USERNAME, default=entry.data[CONF_USERNAME]): str,
-                vol.Required(CONF_PASSWORD, default=entry.data[CONF_PASSWORD]): str,
-                vol.Optional(
-                    CONF_RTSP_TIMEOUT,
-                    default=entry.data.get(CONF_RTSP_TIMEOUT, DEFAULT_RTSP_TIMEOUT),
-                ): int,
-            }
-        )
-
-        return self.async_show_form(
-            step_id="reconfigure", data_schema=schema, errors=errors
-        )
-
     async def async_step_reauth(
         self, entry_data: Mapping[str, Any]
     ) -> config_entries.ConfigFlowResult:
@@ -132,8 +104,11 @@ class TigersecuDVRConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
 
         if user_input is not None:
+            new_data = entry.data.copy()
+            new_data.update(user_input)
+
             try:
-                await validate_input(self.hass, user_input)
+                await validate_input(self.hass, new_data)
             except AuthenticationError:
                 errors["base"] = "invalid_auth"
             except (aiohttp.ClientError, ConnectionError):
@@ -144,7 +119,7 @@ class TigersecuDVRConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             else:
                 self.hass.config_entries.async_update_entry(
                     entry,
-                    data=user_input,
+                    data=new_data,
                 )
                 await self.hass.config_entries.async_reload(entry.entry_id)
                 return self.async_abort(reason="reauth_successful")
@@ -154,13 +129,54 @@ class TigersecuDVRConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_HOST, default=entry.data[CONF_HOST]): str,
                 vol.Required(CONF_USERNAME, default=entry.data[CONF_USERNAME]): str,
                 vol.Required(CONF_PASSWORD): str,
-                vol.Optional(
-                    CONF_RTSP_TIMEOUT,
-                    default=entry.data.get(CONF_RTSP_TIMEOUT, DEFAULT_RTSP_TIMEOUT),
-                ): int,
             }
         )
 
         return self.async_show_form(
             step_id="reauth_confirm", data_schema=schema, errors=errors
         )
+
+
+class TigersecuDVROptionsFlow(config_entries.OptionsFlow):
+    """Handle an options flow for Tigersecu DVR."""
+
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        """Initialize options flow."""
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Manage the options."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        # Get current or default values for options
+        host = self.config_entry.options.get(
+            CONF_HOST, self.config_entry.data.get(CONF_HOST)
+        )
+        username = self.config_entry.options.get(
+            CONF_USERNAME, self.config_entry.data.get(CONF_USERNAME)
+        )
+        password = self.config_entry.options.get(
+            CONF_PASSWORD, self.config_entry.data.get(CONF_PASSWORD)
+        )
+        rtsp_timeout = self.config_entry.options.get(
+            CONF_RTSP_TIMEOUT, DEFAULT_RTSP_TIMEOUT
+        )
+        still_image_timeout = self.config_entry.options.get(
+            CONF_STILL_IMAGE_TIMEOUT, DEFAULT_STILL_IMAGE_TIMEOUT
+        )
+
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_HOST, default=host): str,
+                vol.Required(CONF_USERNAME, default=username): str,
+                vol.Required(CONF_PASSWORD, default=password): str,
+                vol.Optional(CONF_RTSP_TIMEOUT, default=rtsp_timeout): int,
+                vol.Optional(
+                    CONF_STILL_IMAGE_TIMEOUT, default=still_image_timeout
+                ): int,
+            }
+        )
+
+        return self.async_show_form(step_id="init", data_schema=schema)
