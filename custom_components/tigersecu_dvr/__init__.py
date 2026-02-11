@@ -11,7 +11,12 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from .pytigersecu import AuthenticationError, TigersecuDVRAPI
-from .const import CONF_RTSP_TIMEOUT, DEFAULT_RTSP_TIMEOUT
+from .const import (
+    CONF_RTSP_TIMEOUT,
+    DEFAULT_RTSP_TIMEOUT,
+    CONF_STILL_IMAGE_TIMEOUT,
+    DEFAULT_STILL_IMAGE_TIMEOUT,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -68,6 +73,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         entry, ["camera", "binary_sensor", "sensor"]
     )
 
+    entry.async_on_unload(entry.add_update_listener(async_update_options))
+
     return True
 
 
@@ -88,6 +95,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
     return unload_ok
 
 
+async def async_update_options(hass: HomeAssistant, entry: ConfigEntry):
+    """Handle options update."""
+    await hass.config_entries.async_reload(entry.entry_id)
+
+
 class TigersecuDVR:
     """Manages the Tigersecu DVR API and coordinates updates."""
 
@@ -98,7 +110,13 @@ class TigersecuDVR:
         self.host = entry.data["host"]
         self.username = entry.data["username"]
         self.password = entry.data["password"]
-        self.rtsp_timeout = entry.data.get(CONF_RTSP_TIMEOUT, DEFAULT_RTSP_TIMEOUT)
+        self.rtsp_timeout = entry.options.get(
+            CONF_RTSP_TIMEOUT, entry.data.get(CONF_RTSP_TIMEOUT, DEFAULT_RTSP_TIMEOUT)
+        )
+        self.still_image_timeout = entry.options.get(
+            CONF_STILL_IMAGE_TIMEOUT,
+            entry.data.get(CONF_STILL_IMAGE_TIMEOUT, DEFAULT_STILL_IMAGE_TIMEOUT),
+        )
         self.channels = []
         self.initial_data_received = asyncio.Event()
         self._async_add_binary_sensors: AddEntitiesCallback | None = None
