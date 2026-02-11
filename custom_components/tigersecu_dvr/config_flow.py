@@ -147,10 +147,7 @@ class TigersecuDVROptionsFlow(config_entries.OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
         """Manage the options."""
-        if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
-
-        # Get current or default values for options
+        errors = {}
         host = self.config_entry.options.get(
             CONF_HOST, self.config_entry.data.get(CONF_HOST)
         )
@@ -167,6 +164,25 @@ class TigersecuDVROptionsFlow(config_entries.OptionsFlow):
             CONF_STILL_IMAGE_TIMEOUT, DEFAULT_STILL_IMAGE_TIMEOUT
         )
 
+        if user_input is not None:
+            if (
+                user_input[CONF_HOST] != host
+                or user_input[CONF_USERNAME] != username
+                or user_input[CONF_PASSWORD] != password
+            ):
+                try:
+                    await validate_input(self.hass, user_input)
+                except AuthenticationError:
+                    errors["base"] = "invalid_auth"
+                except (aiohttp.ClientError, ConnectionError):
+                    errors["base"] = "cannot_connect"
+                except Exception:  # pylint: disable=broad-except
+                    _LOGGER.exception("Unexpected exception")
+                    errors["base"] = "unknown"
+
+            if not errors:
+                return self.async_create_entry(title="", data=user_input)
+
         schema = vol.Schema(
             {
                 vol.Required(CONF_HOST, default=host): str,
@@ -179,4 +195,4 @@ class TigersecuDVROptionsFlow(config_entries.OptionsFlow):
             }
         )
 
-        return self.async_show_form(step_id="init", data_schema=schema)
+        return self.async_show_form(step_id="init", data_schema=schema, errors=errors)
