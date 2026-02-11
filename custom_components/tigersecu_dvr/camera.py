@@ -1,12 +1,15 @@
 """Camera platform for the Tigersecu DVR integration."""
 
+import asyncio
 import logging
 
+import aiohttp
 from yarl import URL
 
 from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
@@ -69,6 +72,36 @@ class TigersecuCamera(CoordinatorEntity[DataUpdateCoordinator], Camera):
             != "None"
         )
 
+    async def async_camera_image(
+        self, width: int | None = None, height: int | None = None
+    ) -> bytes | None:
+        """Return a still image for the camera."""
+        # The URL for a still image from a channel
+        url = f"https://{self._dvr.host}/cgi-bin/net_jpeg.cgi?ch={self._channel_id}"
+        auth = aiohttp.BasicAuth(self._dvr.username, password=self._dvr.password)
+
+        # The DVR uses a self-signed certificate, so we must disable SSL verification.
+        session = async_get_clientsession(self.hass, verify_ssl=False)
+
+        _LOGGER.debug(
+            "Getting camera image for channel %d from URL: %s",
+            self._channel_id + 1,
+            url,
+        )
+        try:
+            async with session.get(
+                url, auth=auth, timeout=self._dvr.rtsp_timeout
+            ) as response:
+                response.raise_for_status()
+                return await response.read()
+        except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+            _LOGGER.error(
+                "Error getting camera image for channel %d: %s",
+                self._channel_id + 1,
+                err,
+            )
+            return None
+
     async def stream_source(self) -> str | None:
         """Return the source of the stream."""
         return str(
@@ -86,4 +119,4 @@ class TigersecuCamera(CoordinatorEntity[DataUpdateCoordinator], Camera):
     @property
     def use_stream_for_stills(self) -> bool:
         """Return True if the stream should be used for still images."""
-        return True
+        return False
