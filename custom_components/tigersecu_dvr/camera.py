@@ -148,16 +148,19 @@ class TigersecuCamera(CoordinatorEntity[DataUpdateCoordinator], Camera):
 
     async def stream_source(self) -> str | None:
         """Return the source of the stream."""
-        return str(
-            URL.build(
-                scheme="rtsp",
-                user=self._dvr.username,
-                password=self._dvr.password,
-                host=self._dvr.host,
-                path=f"/main_{self._channel_id}",
-                query={"transport": "tcp"},
-                fragment=f"timeout={self._dvr.rtsp_timeout}",
+        return (
+            str(
+                URL.build(
+                    scheme="rtsp",
+                    user=self._dvr.username,
+                    password=self._dvr.password,
+                    host=self._dvr.host,
+                    path=f"/main_{self._channel_id}",
+                    query={"transport": "tcp"},
+                )
             )
+            + "#transport=tcp"
+            + f"#timeout={self._dvr.rtsp_timeout}"
         )
 
     @property
