@@ -299,7 +299,7 @@ class TigersecuDVRAPI:
                 self._authenticated = True
                 # An 'emsg' is followed by 64 bytes of binary data, then the text payload.
                 if len(self._buffer) < 68:  # 4 bytes for 'emsg' + 64 bytes for header
-                    _LOGGER.debug(
+                    _LOGGER.warning(
                         "Incomplete 'emsg' received, waiting for more data. Buffer: %s",
                         self._buffer[:32].hex(),
                     )
@@ -509,7 +509,9 @@ class TigersecuDVRAPI:
         if handler:
             handler(trigger)
         else:
-            _LOGGER.debug("No handler for event type '%s'; ignoring.", event_type)
+            _LOGGER.debug(
+                "Ignoring unhandled event '%s'; ignoring.", ET.tostring(trigger)
+            )
 
     def _emit(self, data: dict):
         """Emit data via the callback."""
