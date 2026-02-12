@@ -293,7 +293,9 @@ class TigersecuDVRAPI:
                 self._buffer = self._buffer[4:]
                 continue
 
-            if prefix == "emsg":
+            # Look for an emsg -- but sometimes the DVR gets excited during the first emsg and
+            # crams in an extra MIME message with a new Content-Type header.
+            if prefix == "emsg" or prefix == "Cont":
                 self._authenticated = True
                 # An 'emsg' is followed by 64 bytes of binary data, then the text payload.
                 if len(self._buffer) < 68:  # 4 bytes for 'emsg' + 64 bytes for header
@@ -312,8 +314,19 @@ class TigersecuDVRAPI:
                     )
                     return
 
-                header_bytes = self._buffer[68:headers_end_pos]
-                payload_start_pos = headers_end_pos + 4
+                # If we got an extra Content-Type without a new emsg, set the buffer offsets
+                # accordingly and just roll with it
+                if prefix == "Cont" and self._buffer.casefold().startswith(
+                    b"Content-type:".casefold()
+                ):
+                    _LOGGER.debug(
+                        "Looks like we received additional MIME message within an emsg"
+                    )
+                    header_bytes = self._buffer[:headers_end_pos]
+                else:
+                    header_bytes = self._buffer[68:headers_end_pos]
+
+                payload_start_pos = headers_end_pos + 4  # Skip past the double CRLF
 
                 # The DVR sometimes includes an HTTP status line before the headers.
                 # If present, strip it out before parsing.
