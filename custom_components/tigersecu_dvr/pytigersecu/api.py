@@ -281,7 +281,7 @@ class TigersecuDVRAPI:
         while len(self._buffer) >= 4:
             prefix = self._buffer[:4].decode("ascii", errors="ignore")
 
-            if prefix in ("erqu", "erco"):
+            if prefix in ("erqu", "erco"):  # 0x65727175, 0x6572636f
                 _LOGGER.error(
                     "Received '%s' message, connection is invalid. Reconnecting. Buffer: %s",
                     prefix,
@@ -290,7 +290,7 @@ class TigersecuDVRAPI:
                 # This will cause the _listen loop to exit and the manager to reconnect.
                 raise ConnectionError(f"Received '{prefix}' from DVR")
 
-            if prefix == "wsev":
+            if prefix == "wsev":  # 0x77736576
                 _LOGGER.debug("Received 'wsev' acknowledgment.")
                 self._authenticated = True
                 # This is just an acknowledgment. Consume the 4 bytes and continue processing.
@@ -299,7 +299,7 @@ class TigersecuDVRAPI:
 
             # Look for an emsg -- but sometimes the DVR gets excited during the first emsg and
             # crams in an extra MIME message with a new Content-Type header.
-            if prefix == "emsg" or prefix == "Cont":
+            if prefix == "emsg" or prefix == "Cont":  # 0x656d7367
                 self._authenticated = True
                 # An 'emsg' is followed by 64 bytes of binary data, then the text payload.
                 if len(self._buffer) < 68:  # 4 bytes for 'emsg' + 64 bytes for header
