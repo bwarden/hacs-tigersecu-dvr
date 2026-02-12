@@ -206,11 +206,11 @@ class TigersecuDVRAPI:
         """Manages the connection and reconnection logic."""
         backoff_time = 1
         while True:
+            start_time = asyncio.get_running_loop().time()
             try:
                 await self._connect_internal()
                 self.connected.set()
                 _LOGGER.info("Successfully connected to DVR.")
-                backoff_time = 1  # Reset backoff on successful connection
                 await self._listen()  # This will run until the connection is lost
 
             except AuthenticationError:
@@ -230,6 +230,10 @@ class TigersecuDVRAPI:
             if self._ws and not self._ws.closed:
                 await self._ws.close()
             self.connected.clear()
+
+            # If the connection lasted for a while (e.g. > 60s), reset the backoff.
+            if asyncio.get_running_loop().time() - start_time > 60:
+                backoff_time = 1
 
             await asyncio.sleep(backoff_time)
             backoff_time = min(backoff_time * 2, 60)
