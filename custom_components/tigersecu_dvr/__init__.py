@@ -215,6 +215,14 @@ class TigersecuDVR:
                 }
                 updated = True
 
+            channel_data = current_data["channels"][channel_id]
+            if channel_data.get("chip") != data.get("Chip"):
+                channel_data["chip"] = data.get("Chip")
+                updated = True
+            if channel_data.get("format") != data.get("Format"):
+                channel_data["format"] = data.get("Format")
+                updated = True
+
         elif event_type == "motion":
             channel_id = trigger_data.get("channel")
             state = trigger_data.get("state")
