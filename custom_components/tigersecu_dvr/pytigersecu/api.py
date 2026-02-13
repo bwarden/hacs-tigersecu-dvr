@@ -530,6 +530,7 @@ class TigersecuDVRAPI:
                 )
         except (ValueError, KeyError):
             _LOGGER.warning("Received invalid Motion event: %s", trigger.attrib)
+        _LOGGER.debug("Motion Status: %s", trigger.get("Status"))
 
     def _handle_vloss_event(self, trigger: ET.Element):
         """Handle a video loss event and emit structured data."""
@@ -543,6 +544,7 @@ class TigersecuDVRAPI:
                 self._emit({"event": "vloss", "channel": channel_id, "state": is_vloss})
         except (ValueError, KeyError):
             _LOGGER.warning("Received invalid VLOSS event: %s", trigger.attrib)
+        _LOGGER.debug("VLOSS Status: %s", trigger.get("Status"))
 
     def _handle_sensor_event(self, trigger: ET.Element):
         """Handle a sensor event and emit structured data."""
@@ -573,6 +575,7 @@ class TigersecuDVRAPI:
                 )
         except (ValueError, KeyError):
             _LOGGER.warning("Received invalid Sensor event: %s", trigger.attrib)
+        _LOGGER.debug("Sensor Status: %s", trigger.get("Status"))
 
     def _handle_disk_event(self, trigger: ET.Element):
         """Handle a disk status event."""
