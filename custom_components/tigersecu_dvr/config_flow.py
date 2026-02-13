@@ -17,8 +17,6 @@ from .pytigersecu import AuthenticationError, TigersecuDVRAPI
 from .const import (
     CONF_RTSP_TIMEOUT,
     DEFAULT_RTSP_TIMEOUT,
-    CONF_STILL_IMAGE_TIMEOUT,
-    DEFAULT_STILL_IMAGE_TIMEOUT,
     DOMAIN,
 )
 
@@ -30,9 +28,6 @@ DATA_SCHEMA = vol.Schema(
         vol.Required(CONF_USERNAME): str,
         vol.Required(CONF_PASSWORD): str,
         vol.Optional(CONF_RTSP_TIMEOUT, default=DEFAULT_RTSP_TIMEOUT): int,
-        vol.Optional(
-            CONF_STILL_IMAGE_TIMEOUT, default=DEFAULT_STILL_IMAGE_TIMEOUT
-        ): int,
     }
 )
 
@@ -160,9 +155,6 @@ class TigersecuDVROptionsFlow(config_entries.OptionsFlow):
         rtsp_timeout = self.config_entry.options.get(
             CONF_RTSP_TIMEOUT, DEFAULT_RTSP_TIMEOUT
         )
-        still_image_timeout = self.config_entry.options.get(
-            CONF_STILL_IMAGE_TIMEOUT, DEFAULT_STILL_IMAGE_TIMEOUT
-        )
 
         if user_input is not None:
             if (
@@ -189,9 +181,6 @@ class TigersecuDVROptionsFlow(config_entries.OptionsFlow):
                 vol.Required(CONF_USERNAME, default=username): str,
                 vol.Required(CONF_PASSWORD, default=password): str,
                 vol.Optional(CONF_RTSP_TIMEOUT, default=rtsp_timeout): int,
-                vol.Optional(
-                    CONF_STILL_IMAGE_TIMEOUT, default=still_image_timeout
-                ): int,
             }
         )
 
