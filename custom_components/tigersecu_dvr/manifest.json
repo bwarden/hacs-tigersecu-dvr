@@ -11,5 +11,5 @@
   "documentation": "https://github.com/bwarden/hacs-tigersecu-dvr",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/bwarden/hacs-tigersecu-dvr/issues",
-  "version": "1.2.3"
+  "version": "1.2.4"
 }
