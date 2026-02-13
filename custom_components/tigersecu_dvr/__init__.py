@@ -69,7 +69,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
 
     # Setup platforms now that we have the initial data
     await hass.config_entries.async_forward_entry_setups(
-        entry, ["camera", "binary_sensor", "sensor"]
+        entry, ["camera", "binary_sensor", "sensor", "update"]
     )
 
     entry.async_on_unload(entry.add_update_listener(async_update_options))
@@ -85,6 +85,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
     )
     unload_ok = unload_ok and await hass.config_entries.async_forward_entry_unload(
         entry, "sensor"
+    )
+    unload_ok = unload_ok and await hass.config_entries.async_forward_entry_unload(
+        entry, "update"
     )
 
     if unload_ok:
@@ -140,6 +143,7 @@ class TigersecuDVR:
             "sensors": {},
             "system": {"time_sync_problem": False},
             "last_login": None,
+            "update_progress": None,
         }
         self.api = TigersecuDVRAPI(
             self.host,
@@ -375,6 +379,10 @@ class TigersecuDVR:
 
             except (ValueError, TypeError):
                 _LOGGER.error("Could not parse DateTime event value: %s", trigger_data)
+
+        elif event_type == "dvr_update":
+            current_data["update_progress"] = trigger_data.get("progress")
+            updated = True
 
         if updated:
             self.coordinator.async_set_updated_data(self.coordinator.data)

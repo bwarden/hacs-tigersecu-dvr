@@ -62,6 +62,7 @@ class TigersecuDVRAPI:
             "Sensor": self._handle_sensor_event,
             "VideoInput": self._handle_video_input_event,
             "DateTime": self._handle_datetime_event,
+            "UpgradeProgress": self._handle_upgrade_progress_event,
         }
 
         # Handled Events:
@@ -70,6 +71,7 @@ class TigersecuDVRAPI:
         # <Trigger Event="Login" User="admin" From="127.0.0.1"/>
         # <Trigger Event="Motion" Value="525" Status="17407"/>
         # <Trigger Event="Network" Link="True" IP="172.16.4.13" MAC="DE:AD:BE:EF:AA:55" DHCP_Gateway="172.16.4.1" DHCP_Netmask="255.255.255.0" GIP="1.1.1.1" SPD="100"/>
+        # <Trigger Event="UpgradeProgress" Value="50"/>
         # <Trigger Event="Record" ID="0" Type="None"/>
         # <Trigger Event="Scheme" ID="2"/>
         # <Trigger Event="Sensor" Value="5" Status="0"/>
@@ -681,3 +683,14 @@ class TigersecuDVRAPI:
             self._emit({"event": "datetime", "timestamp": timestamp})
         except (ValueError, KeyError, TypeError):
             _LOGGER.warning("Received invalid DateTime event: %s", trigger.attrib)
+
+    def _handle_upgrade_progress_event(self, trigger: ET.Element):
+        """Handle an UpgradeProgress event."""
+        # Note that DVR uses "Upgrade" nomenclature while HA uses "Update"
+        try:
+            progress = int(trigger.get("Value"))
+            self._emit({"event": "dvr_update", "progress": progress})
+        except (ValueError, KeyError, TypeError):
+            _LOGGER.warning(
+                "Received invalid UpgradeProgress event: %s", trigger.attrib
+            )
