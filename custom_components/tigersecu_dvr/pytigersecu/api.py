@@ -320,12 +320,8 @@ class TigersecuDVRAPI:
 
                 # If we got an extra Content-Type without a new emsg, set the buffer offsets
                 # accordingly and just roll with it
-                if prefix == "Cont" and self._buffer.casefold().startswith(
-                    b"Content-type:".casefold()
-                ):
-                    _LOGGER.debug(
-                        "Looks like we received additional MIME message within an emsg"
-                    )
+                if prefix == "Cont" and self._buffer[:13].lower() == b"content-type:":
+                    _LOGGER.debug("Parsing additional MIME message within this emsg")
                     header_bytes = self._buffer[:headers_end_pos]
                 else:
                     header_bytes = self._buffer[68:headers_end_pos]
@@ -513,9 +509,7 @@ class TigersecuDVRAPI:
         if handler:
             handler(trigger)
         else:
-            _LOGGER.debug(
-                "Ignoring unhandled event '%s'; ignoring.", ET.tostring(trigger)
-            )
+            _LOGGER.debug("Ignoring unhandled event: '%s'", ET.tostring(trigger))
 
     def _emit(self, data: dict):
         """Emit data via the callback."""
