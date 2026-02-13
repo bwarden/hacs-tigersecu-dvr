@@ -54,6 +54,7 @@ This integration will create a device in Home Assistant representing your DVR. T
 ### Camera
 
 *   **Channel Camera**: A camera entity for each channel (e.g., `CH01`, `CH02`), providing a live RTSP stream.
+    *   **Attributes**: `chip`, `format` (from `VideoInput` event).
 
 ### Binary Sensors
 
@@ -83,6 +84,10 @@ The following sensors are created to provide diagnostic information.
 *   **S.M.A.R.T. (per disk, per attribute, disabled by default)**:
     *   The value of a specific S.M.A.R.T. attribute. Additional details are available as state attributes. You can enable these sensors from the entity settings if needed.
 
+### Update
+
+*   **DVR Update**: An update entity that reports the progress of a firmware update initiated on the DVR.
+
 ## Troubleshooting
 
 If you have trouble connecting, ensure:
@@ -107,7 +112,8 @@ The integration listens for the following event types from the DVR's websocket.
 | `Scheme`             | Yes     | `sensor.disk_scheme`                                                                       |
 | `Sensor`             | Yes     | `binary_sensor.sensor_X` (dynamically created)                                             |
 | `SMART`              | Yes     | `sensor.disk_X_smart_Y`                                                                    |
-| `VideoInput`         | Yes     | `camera.chXX` (discovery)                                                                  |
+| `UpgradeProgress`    | Yes     | `update.dvr_update` (progress)                                                             |
+| `VideoInput`         | Yes     | `camera.chXX` (discovery, attributes)                                                      |
 | `VLOSS`              | Yes     | `binary_sensor.video_loss_chXX`, `camera.chXX` (availability)                              |
 | `ConfigChange`       | No      | -                                                                                          |
 | `ErrorAuthorization` | No      | -                                                                                          |
