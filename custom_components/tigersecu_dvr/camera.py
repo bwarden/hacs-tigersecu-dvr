@@ -89,3 +89,12 @@ class TigersecuCamera(CoordinatorEntity[DataUpdateCoordinator], Camera):
     def use_stream_for_stills(self) -> bool:
         """Return True if the stream should be used for still images."""
         return True
+
+    @property
+    def extra_state_attributes(self) -> dict[str, str | None]:
+        """Return the state attributes."""
+        channel_data = self.coordinator.data["channels"][self._channel_id]
+        return {
+            "chip": channel_data.get("chip"),
+            "format": channel_data.get("format"),
+        }
