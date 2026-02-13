@@ -694,3 +694,62 @@ class TigersecuDVRAPI:
             _LOGGER.warning(
                 "Received invalid UpgradeProgress event: %s", trigger.attrib
             )
+
+    async def fetch_profile_info(self) -> dict:
+        """Fetch profile configuration information from the DVR."""
+        url = f"https://{self.host}/cn/cmd"
+        # The DVR expects a specific multipart format.
+        data = (
+            "------DVRBoundary\r\n"
+            'Content-Disposition: form-data; name="datafile"; filename="command.xml"\r\n'
+            "Content-Type: text/xml\r\n\r\n"
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>'
+            '<DVR Platform="Hi3520"><GetConfiguration File="profile.xml" /></DVR>'
+            "\r\n------DVRBoundary--\r\n"
+        )
+        headers = {"Content-Type": "multipart/form-data; boundary=----DVRBoundary"}
+
+        ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+
+        auth = aiohttp.BasicAuth(self.username, self.password)
+
+        try:
+            async with self._session.post(
+                url, data=data, headers=headers, auth=auth, ssl=ssl_context, timeout=10
+            ) as response:
+                response.raise_for_status()
+                text = await response.text()
+                return self._parse_profile_xml(text)
+        except Exception as err:
+            _LOGGER.debug("Failed to fetch profile info: %s", err)
+            return {}
+
+    def _parse_profile_xml(self, xml_string: str) -> dict:
+        try:
+            root = ET.fromstring(xml_string)
+            # The inner XML is in CDATA inside GetConfigurationResponse
+            response_node = root.find("GetConfigurationResponse")
+            if response_node is None or not response_node.text:
+                return {}
+
+            inner_xml = response_node.text
+            inner_root = ET.fromstring(inner_xml)
+
+            profile = inner_root.find("Profile")
+            if profile is None:
+                return {}
+
+            info = {}
+            platform = profile.find("Platform")
+            if platform is not None:
+                info["hardware"] = platform.get("Hardware")
+                info["model"] = platform.get("Model")
+                info["version"] = platform.get("Software")
+                info["mac"] = platform.get("MAC")
+
+            return info
+        except Exception as err:
+            _LOGGER.debug("Failed to parse profile info XML: %s", err)
+            return {}

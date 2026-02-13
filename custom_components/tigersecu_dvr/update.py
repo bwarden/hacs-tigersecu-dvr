@@ -44,8 +44,7 @@ class TigersecuUpdateEntity(CoordinatorEntity, UpdateEntity):
     @property
     def installed_version(self) -> str | None:
         """Return the installed version."""
-        # Version information is not currently available from the API
-        return "Unknown"
+        return self._dvr.firmware_version or "Unknown"
 
     @property
     def in_progress(self) -> int | bool:

@@ -116,6 +116,10 @@ class TigersecuDVR:
             CONF_RTSP_TIMEOUT, entry.data.get(CONF_RTSP_TIMEOUT, DEFAULT_RTSP_TIMEOUT)
         )
         self.channels = []
+        self.firmware_version = None
+        self.model = None
+        self.hardware = None
+        self.mac_address = None
         self.initial_data_received = asyncio.Event()
         self._async_add_binary_sensors: AddEntitiesCallback | None = None
         self._created_sensor_ids = set()
@@ -156,6 +160,14 @@ class TigersecuDVR:
 
     async def async_connect(self):
         """Connect to the DVR."""
+        # Fetch device info via HTTP
+        info = await self.api.fetch_profile_info()
+        if info:
+            self.firmware_version = info.get("version")
+            self.model = info.get("model")
+            self.hardware = info.get("hardware")
+            self.mac_address = info.get("mac")
+
         # Reset counter on each new connection attempt
         self._message_count_since_connect = 0
         await self.api.async_connect()

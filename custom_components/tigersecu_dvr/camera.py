@@ -53,6 +53,8 @@ class TigersecuCamera(CoordinatorEntity[DataUpdateCoordinator], Camera):
             "identifiers": {(DOMAIN, self._dvr.entry.entry_id)},
             "name": self._dvr.host,
             "manufacturer": "Tigersecu",
+            "model": self._dvr.model,
+            "sw_version": self._dvr.firmware_version,
         }
 
     @property
