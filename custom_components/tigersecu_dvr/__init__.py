@@ -15,8 +15,6 @@ from .pytigersecu import AuthenticationError, TigersecuDVRAPI
 from .const import (
     CONF_RTSP_TIMEOUT,
     DEFAULT_RTSP_TIMEOUT,
-    CONF_STILL_IMAGE_TIMEOUT,
-    DEFAULT_STILL_IMAGE_TIMEOUT,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -113,10 +111,6 @@ class TigersecuDVR:
         self.password = entry.options.get(CONF_PASSWORD, entry.data[CONF_PASSWORD])
         self.rtsp_timeout = entry.options.get(
             CONF_RTSP_TIMEOUT, entry.data.get(CONF_RTSP_TIMEOUT, DEFAULT_RTSP_TIMEOUT)
-        )
-        self.still_image_timeout = entry.options.get(
-            CONF_STILL_IMAGE_TIMEOUT,
-            entry.data.get(CONF_STILL_IMAGE_TIMEOUT, DEFAULT_STILL_IMAGE_TIMEOUT),
         )
         self.channels = []
         self.initial_data_received = asyncio.Event()
