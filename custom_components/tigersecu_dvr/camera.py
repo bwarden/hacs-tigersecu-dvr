@@ -71,6 +71,9 @@ class TigersecuCamera(CoordinatorEntity[DataUpdateCoordinator], Camera):
 
     async def stream_source(self) -> str | None:
         """Return the source of the stream."""
+        if not self._dvr.api.connected.is_set():
+            return None
+
         return str(
             URL.build(
                 scheme="rtsp",
