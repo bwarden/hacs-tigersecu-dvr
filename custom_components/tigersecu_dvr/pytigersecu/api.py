@@ -695,19 +695,29 @@ class TigersecuDVRAPI:
                 "Received invalid UpgradeProgress event: %s", trigger.attrib
             )
 
-    async def fetch_profile_info(self) -> dict:
-        """Fetch profile configuration information from the DVR."""
+    async def _request_config_file(self, config_file: str) -> str:
+        """Post a GetConfiguration command with retries and return the response text."""
+        max_retries = 3
+        backoff_time = 1
+        last_error = None
+
         url = f"https://{self.host}/cn/cmd"
-        # The DVR expects a specific multipart format.
-        data = (
-            "------DVRBoundary\r\n"
-            'Content-Disposition: form-data; name="datafile"; filename="command.xml"\r\n'
-            "Content-Type: text/xml\r\n\r\n"
-            '<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>'
-            '<DVR Platform="Hi3520"><GetConfiguration File="profile.xml" /></DVR>'
-            "\r\n------DVRBoundary--\r\n"
+
+        # Generate XML for the command
+        dvr_element = ET.Element("DVR", {"Platform": "Hi3520"})
+        ET.SubElement(dvr_element, "GetConfiguration", {"File": config_file})
+        xml_declaration = '<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>'
+        command_xml_str = ET.tostring(dvr_element, encoding="unicode")
+        command_xml = (xml_declaration + command_xml_str).encode("utf-8")
+
+        # Build multipart form data
+        form_data = aiohttp.FormData()
+        form_data.add_field(
+            "datafile",
+            command_xml,
+            filename="command.xml",
+            content_type="text/xml",
         )
-        headers = {"Content-Type": "multipart/form-data; boundary=----DVRBoundary"}
 
         ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         ssl_context.check_hostname = False
@@ -715,13 +725,42 @@ class TigersecuDVRAPI:
 
         auth = aiohttp.BasicAuth(self.username, self.password)
 
+        for attempt in range(max_retries):
+            try:
+                _LOGGER.debug("Requesting %s from %s", config_file, self.host)
+
+                async with self._session.post(
+                    url, data=form_data, auth=auth, ssl=ssl_context, timeout=10
+                ) as response:
+                    response.raise_for_status()
+                    return await response.text()
+            except (aiohttp.ClientError, ConnectionError, asyncio.TimeoutError) as err:
+                last_error = err
+                if attempt < max_retries - 1:
+                    _LOGGER.warning(
+                        "Failed to request config file '%s' (attempt %d/%d): %s. Retrying in %d seconds.",
+                        config_file,
+                        attempt + 1,
+                        max_retries,
+                        err,
+                        backoff_time,
+                    )
+                    await asyncio.sleep(backoff_time)
+                    backoff_time = min(backoff_time * 2, 15)
+
+        _LOGGER.error(
+            "Failed to request config file '%s' after %d attempts.",
+            config_file,
+            max_retries,
+        )
+        raise last_error
+
+    async def fetch_profile_info(self) -> dict:
+        """Fetch profile configuration information from the DVR."""
         try:
-            async with self._session.post(
-                url, data=data, headers=headers, auth=auth, ssl=ssl_context, timeout=10
-            ) as response:
-                response.raise_for_status()
-                text = await response.text()
-                return self._parse_profile_xml(text)
+            response_text = await self._request_config_file("profile.xml")
+            _LOGGER.debug("Fetched profile info")
+            return self._parse_profile_xml(response_text)
         except Exception as err:
             _LOGGER.debug("Failed to fetch profile info: %s", err)
             return {}
