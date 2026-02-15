@@ -8,6 +8,9 @@ from typing import Awaitable, Callable
 from email.parser import BytesParser
 from xml.etree import ElementTree as ET
 
+from cryptography import x509
+from cryptography.hazmat.primitives import serialization
+
 import aiohttp
 
 _LOGGER = logging.getLogger(__name__)
@@ -30,6 +33,8 @@ class TigersecuDVRAPI:
         update_callback: Callable[[dict], Awaitable[None]] = None,
         raw_xml_callback: Callable[[str], Awaitable[None]] = None,
         raw_binary_callback: Callable[[bytes], Awaitable[None]] = None,
+        cert_data: str | None = None,
+        cert_received_callback: Callable[[str], Awaitable[None]] = None,
     ):
         """Initialize the API."""
         self.host = host
@@ -39,6 +44,8 @@ class TigersecuDVRAPI:
         self._update_callback = update_callback
         self._raw_xml_callback = raw_xml_callback
         self._raw_binary_callback = raw_binary_callback
+        self.cert_data = cert_data
+        self._cert_received_callback = cert_received_callback
         self._ws = None
         self._listen_task = None
         self._manager_task = None
@@ -146,18 +153,29 @@ class TigersecuDVRAPI:
         auth_str = base64.b64encode(f"{self.username}:{self.password}".encode()).decode(
             "ascii"
         )
-
-        # DVRs often use self-signed certificates
-        # Use ssl.SSLContext() instead of ssl.create_default_context() to avoid
-        # blocking I/O calls for loading default certs and paths, which are not needed.
-        ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        ssl_context.check_hostname = False
+        if self.cert_data:
+            ssl_context = await asyncio.to_thread(
+                ssl.create_default_context, cadata=self.cert_data
+            )
+            ssl_context.check_hostname = False
+        else:
+            # DVRs often use self-signed certificates that may be malformed (e.g. missing CA:TRUE).
+            # We use CERT_NONE and verify the certificate manually against our stored copy.
+            ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            ssl_context.check_hostname = False
         ssl_context.verify_mode = ssl.CERT_NONE
 
         # Establish the connection without any authentication headers.
         self._ws = await self._session.ws_connect(
             url, protocols=("message",), ssl=ssl_context, timeout=10
         )
+
+        # Verify certificate
+        if self.cert_data and hasattr(self._ws, "_response"):
+            pem_cert = self._get_pem_cert(self._ws._response.connection.transport)
+            if pem_cert and pem_cert != self.cert_data:
+                await self._ws.close()
+                raise ssl.SSLError("Certificate mismatch")
 
         # Send the authentication string as the first message.
         _LOGGER.debug("Websocket connected, sending auth string")
@@ -710,6 +728,18 @@ class TigersecuDVRAPI:
         command_xml_str = ET.tostring(dvr_element, encoding="unicode")
         command_xml = (xml_declaration + command_xml_str).encode("utf-8")
 
+        if self.cert_data:
+            ssl_context = await asyncio.to_thread(
+                ssl.create_default_context, cadata=self.cert_data
+            )
+            ssl_context.check_hostname = False
+        else:
+            # DVRs often use self-signed certificates that may be malformed (e.g. missing CA:TRUE).
+            # We use CERT_NONE and verify the certificate manually against our stored copy.
+            ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+
         # Build multipart form data
         form_data = aiohttp.FormData()
         form_data.add_field(
@@ -718,10 +748,6 @@ class TigersecuDVRAPI:
             filename="command.xml",
             content_type="text/xml",
         )
-
-        ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        ssl_context.check_hostname = False
-        ssl_context.verify_mode = ssl.CERT_NONE
 
         auth = aiohttp.BasicAuth(self.username, self.password)
 
@@ -733,9 +759,30 @@ class TigersecuDVRAPI:
                     url, data=form_data, auth=auth, ssl=ssl_context, timeout=10
                 ) as response:
                     response.raise_for_status()
+
+                    # Capture/Verify certificate
+                    pem_cert = self._get_pem_cert(response.connection.transport)
+                    if pem_cert:
+                        if self.cert_data:
+                            if pem_cert != self.cert_data:
+                                raise ssl.SSLError("Certificate mismatch")
+                        elif self._cert_received_callback:
+                            await self._cert_received_callback(pem_cert)
+                            self.cert_data = pem_cert
+
                     return await response.text()
-            except (aiohttp.ClientError, ConnectionError, asyncio.TimeoutError) as err:
+            except (
+                aiohttp.ClientError,
+                ConnectionError,
+                asyncio.TimeoutError,
+                ssl.SSLError,
+            ) as err:
                 last_error = err
+                if isinstance(err, ssl.SSLError):
+                    _LOGGER.debug(
+                        "SSL Error requesting config file '%s': %s", config_file, err
+                    )
+                    break
                 if attempt < max_retries - 1:
                     _LOGGER.warning(
                         "Failed to request config file '%s' (attempt %d/%d): %s. Retrying in %d seconds.",
@@ -748,12 +795,28 @@ class TigersecuDVRAPI:
                     await asyncio.sleep(backoff_time)
                     backoff_time = min(backoff_time * 2, 15)
 
-        _LOGGER.error(
-            "Failed to request config file '%s' after %d attempts.",
-            config_file,
-            max_retries,
-        )
+        if not isinstance(last_error, ssl.SSLError):
+            _LOGGER.error(
+                "Failed to request config file '%s' after %d attempts.",
+                config_file,
+                max_retries,
+            )
         raise last_error
+
+    def _get_pem_cert(self, transport) -> str | None:
+        """Extract the PEM certificate from the transport."""
+        if not transport:
+            return None
+        ssl_object = transport.get_extra_info("ssl_object")
+        if not ssl_object:
+            return None
+        peercert_der = ssl_object.getpeercert(binary_form=True)
+        if not peercert_der:
+            return None
+
+        cert = x509.load_der_x509_certificate(peercert_der)
+        pem_bytes = cert.public_bytes(serialization.Encoding.PEM)
+        return pem_bytes.decode("ascii")
 
     async def fetch_profile_info(self) -> dict:
         """Fetch profile configuration information from the DVR."""
@@ -761,6 +824,8 @@ class TigersecuDVRAPI:
             response_text = await self._request_config_file("profile.xml")
             _LOGGER.debug("Fetched profile info")
             return self._parse_profile_xml(response_text)
+        except ssl.SSLError:
+            raise
         except Exception as err:
             _LOGGER.debug("Failed to fetch profile info: %s", err)
             return {}
