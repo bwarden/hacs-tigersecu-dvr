@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import ssl
 import time
 from datetime import timedelta
 
@@ -120,6 +121,9 @@ class TigersecuDVR:
         self.model = None
         self.hardware = None
         self.mac_address = None
+        self.cert_path = self.hass.config.path(
+            f"tigersecu_dvr_{self.entry.entry_id}.pem"
+        )
         self.initial_data_received = asyncio.Event()
         self._async_add_binary_sensors: AddEntitiesCallback | None = None
         self._created_sensor_ids = set()
@@ -149,6 +153,7 @@ class TigersecuDVR:
             "last_login": None,
             "update_progress": None,
         }
+
         self.api = TigersecuDVRAPI(
             self.host,
             self.username,
@@ -156,12 +161,56 @@ class TigersecuDVR:
             session=async_get_clientsession(hass),
             update_callback=self._handle_trigger_update,
             raw_xml_callback=self._handle_raw_xml,
+            cert_received_callback=self._handle_cert_received,
         )
+
+    def _read_cert(self):
+        """Read the certificate file."""
+        try:
+            with open(self.cert_path, "r", encoding="utf-8") as f:
+                return f.read()
+        except FileNotFoundError:
+            return None
 
     async def async_connect(self):
         """Connect to the DVR."""
+        # Load certificate
+        cert_data = await self.hass.async_add_executor_job(self._read_cert)
+        if cert_data:
+            _LOGGER.info("Loaded stored certificate from %s", self.cert_path)
+            self.api.cert_data = cert_data
+        else:
+            _LOGGER.info(
+                "No stored certificate found for DVR at %s. Will capture on first connection.",
+                self.host,
+            )
+
         # Fetch device info via HTTP
-        info = await self.api.fetch_profile_info()
+        try:
+            info = await self.api.fetch_profile_info()
+        except ssl.SSLError as err:
+            if self.api.cert_data:
+                _LOGGER.error(
+                    "Certificate validation failed for %s. The certificate presented by the DVR does not match "
+                    "the stored certificate at '%s'. If you have recently changed your DVR's IP address, "
+                    "reconfigured its network settings, or regenerated its certificate, this may be expected. "
+                    "To resolve, manually delete the certificate file and restart Home Assistant or reload the integration.",
+                    self.host,
+                    self.cert_path,
+                )
+                raise ConfigEntryNotReady(
+                    f"Certificate validation failed for {self.host}. The stored certificate is invalid."
+                ) from err
+            else:
+                # This would be an SSL error on the initial connection when no cert is stored.
+                _LOGGER.error(
+                    "An unexpected SSL error occurred during initial connection: %s",
+                    err,
+                )
+                raise ConfigEntryNotReady(
+                    f"SSL error during connection to {self.host}"
+                ) from err
+
         if info:
             self.firmware_version = info.get("version")
             self.model = info.get("model")
@@ -171,6 +220,23 @@ class TigersecuDVR:
         # Reset counter on each new connection attempt
         self._message_count_since_connect = 0
         await self.api.async_connect()
+
+    def _write_cert(self, pem_cert: str):
+        """Write the certificate to disk."""
+        try:
+            with open(self.cert_path, "w", encoding="utf-8") as f:
+                f.write(pem_cert)
+            _LOGGER.info("Certificate saved to %s", self.cert_path)
+        except IOError as e:
+            _LOGGER.error("Failed to save DVR certificate: %s", e)
+
+    async def _handle_cert_received(self, pem_cert: str):
+        """Handle receiving a new certificate from the API."""
+        _LOGGER.info(
+            "Captured new certificate for DVR at %s. Storing for future connections.",
+            self.host,
+        )
+        await self.hass.async_add_executor_job(self._write_cert, pem_cert)
 
     def set_binary_sensor_adder(self, async_add_entities: AddEntitiesCallback):
         """Set the callback for adding binary sensors."""
