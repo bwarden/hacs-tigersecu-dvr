@@ -9,9 +9,9 @@ from homeassistant.components.binary_sensor import (
     BinarySensorEntity,
 )
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import TigersecuDVR
@@ -26,7 +26,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the Tigersecu DVR binary sensor platform."""
-    dvr: "TigersecuDVR" = hass.data[DOMAIN][entry.entry_id]
+    dvr: TigersecuDVR = hass.data[DOMAIN][entry.entry_id]
 
     sensors: list[BinarySensorEntity] = []
     for channel_id in sorted(dvr.channels):
@@ -48,7 +48,7 @@ class TigersecuMotionSensor(CoordinatorEntity, BinarySensorEntity):
     _attr_has_entity_name = True
     _attr_device_class = BinarySensorDeviceClass.MOTION
 
-    def __init__(self, dvr: "TigersecuDVR", channel_id: int) -> None:
+    def __init__(self, dvr: TigersecuDVR, channel_id: int) -> None:
         """Initialize the motion sensor."""
         super().__init__(dvr.coordinator)
         self._dvr = dvr
@@ -72,7 +72,7 @@ class TigersecuVlossSensor(CoordinatorEntity, BinarySensorEntity):
     _attr_device_class = BinarySensorDeviceClass.PROBLEM
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
-    def __init__(self, dvr: "TigersecuDVR", channel_id: int) -> None:
+    def __init__(self, dvr: TigersecuDVR, channel_id: int) -> None:
         """Initialize the video loss sensor."""
         super().__init__(dvr.coordinator)
         self._dvr = dvr
@@ -94,7 +94,7 @@ class TigersecuAlarmSensor(CoordinatorEntity, BinarySensorEntity):
 
     _attr_has_entity_name = True
 
-    def __init__(self, dvr: "TigersecuDVR", sensor_id: int) -> None:
+    def __init__(self, dvr: TigersecuDVR, sensor_id: int) -> None:
         """Initialize the alarm sensor."""
         super().__init__(dvr.coordinator)
         self._dvr = dvr
@@ -120,7 +120,7 @@ class TimeSyncProblemSensor(CoordinatorEntity, BinarySensorEntity):
     _attr_entity_registry_enabled_default = False
     _attr_name = "Time Sync Problem"
 
-    def __init__(self, dvr: "TigersecuDVR") -> None:
+    def __init__(self, dvr: TigersecuDVR) -> None:
         """Initialize the sensor."""
         super().__init__(dvr.coordinator)
         self._dvr = dvr

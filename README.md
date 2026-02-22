@@ -76,6 +76,9 @@ The following sensors are created to provide diagnostic information.
 *   **System**:
     *   **Last Login**: Shows the user and source of the last login event.
     *   **Disk Scheme**: The current recording mode (e.g., Continuous, Scheduled/Motion).
+    *   **Motion Status**: (Diagnostic, disabled by default) Raw status value from Motion events.
+    *   **Video Loss Status**: (Diagnostic, disabled by default) Raw status value from VLOSS events.
+    *   **Sensor Status**: (Diagnostic, disabled by default) Raw status value from Sensor events.
 *   **Disk (per disk)**:
     *   Model
     *   Status
@@ -106,15 +109,15 @@ The integration listens for the following event types from the DVR's websocket.
 | `DateTime`           | Yes     | `binary_sensor.time_sync_problem`                                                          |
 | `Disk`               | Yes     | `sensor.disk_X_model`, `sensor.disk_X_status`, `sensor.disk_X_capacity`, `sensor.disk_X_available` |
 | `Login`              | Yes     | `sensor.last_login`                                                                        |
-| `Motion`             | Yes     | `binary_sensor.motion_chXX`                                                                |
+| `Motion`             | Yes     | `binary_sensor.motion_chXX`, `sensor.motion_status`                                        |
 | `Network`            | Yes     | `sensor.ip_address`, `sensor.mac_address`, `sensor.gateway`, `sensor.external_ip`, `sensor.link_speed` |
 | `Record`             | Yes     | `camera.chXX` (is_recording attribute)                                                     |
 | `Scheme`             | Yes     | `sensor.disk_scheme`                                                                       |
-| `Sensor`             | Yes     | `binary_sensor.sensor_X` (dynamically created)                                             |
+| `Sensor`             | Yes     | `binary_sensor.sensor_X` (dynamically created), `sensor.sensor_status`                     |
 | `SMART`              | Yes     | `sensor.disk_X_smart_Y`                                                                    |
 | `UpgradeProgress`    | Yes     | `update.dvr_update` (progress)                                                             |
 | `VideoInput`         | Yes     | `camera.chXX` (discovery, attributes)                                                      |
-| `VLOSS`              | Yes     | `binary_sensor.video_loss_chXX`, `camera.chXX` (availability)                              |
+| `VLOSS`              | Yes     | `binary_sensor.video_loss_chXX`, `camera.chXX` (availability), `sensor.vloss_status`       |
 | `ConfigChange`       | No      | -                                                                                          |
 | `ErrorAuthorization` | No      | -                                                                                          |
 | `Logout`             | No      | -                                                                                          |

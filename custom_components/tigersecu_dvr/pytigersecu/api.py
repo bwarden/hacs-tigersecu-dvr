@@ -4,14 +4,13 @@ import asyncio
 import base64
 import logging
 import ssl
-from typing import Awaitable, Callable
+from collections.abc import Awaitable, Callable
 from email.parser import BytesParser
 from xml.etree import ElementTree as ET
 
+import aiohttp
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
-
-import aiohttp
 
 _LOGGER = logging.getLogger(__name__)
 MESSAGE_TIMEOUT = 60.0
@@ -138,7 +137,7 @@ class TigersecuDVRAPI:
                     aiohttp.WSMsgType.ERROR,
                 ):
                     raise AuthenticationError("Connection rejected by DVR.")
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 if ws.closed:
                     raise AuthenticationError("Connection rejected by DVR (timeout).")
 
@@ -199,7 +198,7 @@ class TigersecuDVRAPI:
 
             if msg.type == aiohttp.WSMsgType.BINARY:
                 self._process_binary_message(msg.data)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             if self._ws.closed and not self._authenticated:
                 raise AuthenticationError("Authentication failed")
             # If open, we just timed out waiting for the first message. Proceed to listen.
@@ -236,7 +235,7 @@ class TigersecuDVRAPI:
             except AuthenticationError:
                 _LOGGER.error("Authentication failed. Aborting connection attempts.")
                 break
-            except (aiohttp.ClientError, ConnectionError, asyncio.TimeoutError) as err:
+            except (TimeoutError, aiohttp.ClientError, ConnectionError) as err:
                 _LOGGER.warning(
                     "Connection to DVR lost: %s. Reconnecting in %d seconds.",
                     err,
@@ -265,7 +264,7 @@ class TigersecuDVRAPI:
         while not self._ws.closed:
             try:
                 msg = await self._ws.receive(timeout=MESSAGE_TIMEOUT)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 _LOGGER.warning(
                     "No message received in %s seconds. Buffer content: %s",
                     MESSAGE_TIMEOUT,
@@ -543,6 +542,7 @@ class TigersecuDVRAPI:
         # I don't know what Status represents.
         try:
             motion_mask = int(trigger.get("Value", "0"))
+            self._emit({"event": "motion_status", "status": trigger.get("Status")})
             for channel_id in self.channels:
                 is_motion = bool(motion_mask & (1 << channel_id))
                 self._emit(
@@ -559,6 +559,7 @@ class TigersecuDVRAPI:
         # I don't know what Status represents.
         try:
             vloss_mask = int(trigger.get("Value", "0"))
+            self._emit({"event": "vloss_status", "status": trigger.get("Status")})
             for channel_id in self.channels:
                 is_vloss = bool(vloss_mask & (1 << channel_id))
                 self._emit({"event": "vloss", "channel": channel_id, "state": is_vloss})
@@ -573,6 +574,7 @@ class TigersecuDVRAPI:
         # I don't know what Status represents.
         try:
             sensor_mask = int(trigger.get("Value", "0"))
+            self._emit({"event": "sensor_status", "status": trigger.get("Status")})
             # Unlike Motion or VLOSS, the sensor bitmask is not tied to channels.
             # Each bit represents a distinct sensor. We assume
             # that if sensor 'N' is asserted, sensors 0 through N all exist.
@@ -772,9 +774,9 @@ class TigersecuDVRAPI:
 
                     return await response.text()
             except (
+                TimeoutError,
                 aiohttp.ClientError,
                 ConnectionError,
-                asyncio.TimeoutError,
                 ssl.SSLError,
             ) as err:
                 last_error = err

@@ -2,8 +2,6 @@
 
 import logging
 
-from yarl import URL
-
 from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -12,6 +10,7 @@ from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
     DataUpdateCoordinator,
 )
+from yarl import URL
 
 from . import TigersecuDVR
 from .const import DOMAIN
