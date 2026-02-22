@@ -3,62 +3,20 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
+from typing import Any
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
 from . import TigersecuDVR
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
-
-
-async def async_setup_entry(
-    hass: HomeAssistant,
-    entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
-) -> None:
-    """Set up the Tigersecu DVR sensor platform."""
-    dvr: TigersecuDVR = hass.data[DOMAIN][entry.entry_id]
-    sensors: list[SensorEntity] = []
-
-    # Network Sensors
-    network_sensors = [
-        NetworkSensor(dvr, "ip", "IP Address", "mdi:ip-network"),
-        NetworkSensor(dvr, "mac", "MAC Address", "mdi:network"),
-        NetworkSensor(dvr, "gateway", "Gateway", "mdi:router-network"),
-        NetworkSensor(dvr, "external_ip", "External IP", "mdi:wan"),
-        NetworkSensor(dvr, "speed", "Link Speed", "mdi:speedometer", "Mbps"),
-    ]
-    sensors.extend(network_sensors)
-
-    # Last Login Sensor
-    sensors.append(LastLoginSensor(dvr))
-
-    # Disk Scheme Sensor
-    sensors.append(TigersecuDiskSchemeSensor(dvr))
-
-    # Disk and SMART Sensors
-    for disk_id in dvr.coordinator.data.get("disks", {}):
-        sensors.append(DiskSensor(dvr, disk_id, "model", "Model", "mdi:harddisk"))
-        sensors.append(DiskSensor(dvr, disk_id, "status", "Status", "mdi:list-status"))
-        sensors.append(
-            DiskSensor(dvr, disk_id, "capacity_gb", "Capacity", "mdi:database", "GB")
-        )
-        sensors.append(
-            DiskSensor(
-                dvr, disk_id, "available_gb", "Available", "mdi:database-check", "GB"
-            )
-        )
-        for attr_id in dvr.coordinator.data["disks"][disk_id].get(
-            "smart_attributes", {}
-        ):
-            sensors.append(SmartAttributeSensor(dvr, disk_id, attr_id))
-
-    async_add_entities(sensors)
 
 
 class TigersecuSensorBase(CoordinatorEntity, SensorEntity):
@@ -116,12 +74,31 @@ class LastLoginSensor(TigersecuSensorBase):
         return f"{login_info.get('user')} from {login_info.get('from')}"
 
 
+class TigersecuStatusSensor(TigersecuSensorBase):
+    """A sensor for a status attribute."""
+
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, dvr: TigersecuDVR, key: str, name: str, icon: str):
+        """Initialize the status sensor."""
+        super().__init__(dvr)
+        self._key = key
+        self._attr_name = name
+        self._attr_icon = icon
+        self._attr_unique_id = f"{self._dvr.entry.entry_id}_{self._key}"
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the state of the sensor."""
+        return self.coordinator.data.get(self._key)
+
+
 class TigersecuDiskSchemeSensor(TigersecuSensorBase):
     """A sensor for the disk recording scheme of a Tigersecu DVR."""
 
     _attr_icon = "mdi:record-rec"
 
-    def __init__(self, dvr: "TigersecuDVR") -> None:
+    def __init__(self, dvr: TigersecuDVR) -> None:
         """Initialize the disk scheme sensor."""
         super().__init__(dvr)
         self._attr_name = "Disk Scheme"
@@ -213,7 +190,7 @@ class SmartAttributeSensor(TigersecuSensorBase):
         return None
 
     @property
-    def extra_state_attributes(self) -> dict[str, str] | None:
+    def extra_state_attributes(self) -> Mapping[str, Any] | None:
         """Return the other SMART data as attributes."""
         if data := self._attribute_data:
             return {
@@ -222,3 +199,57 @@ class SmartAttributeSensor(TigersecuSensorBase):
                 "raw": data.get("raw"),
             }
         return None
+
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up the Tigersecu DVR sensor platform."""
+    dvr: TigersecuDVR = hass.data[DOMAIN][entry.entry_id]
+    sensors: list[SensorEntity] = []
+
+    # Network Sensors
+    network_sensors = [
+        NetworkSensor(dvr, "ip", "IP Address", "mdi:ip-network"),
+        NetworkSensor(dvr, "mac", "MAC Address", "mdi:network"),
+        NetworkSensor(dvr, "gateway", "Gateway", "mdi:router-network"),
+        NetworkSensor(dvr, "external_ip", "External IP", "mdi:wan"),
+        NetworkSensor(dvr, "speed", "Link Speed", "mdi:speedometer", "Mbps"),
+    ]
+    sensors.extend(network_sensors)
+
+    # Last Login Sensor
+    sensors.append(LastLoginSensor(dvr))
+
+    # Status Sensors
+    for key, name, icon in (
+        ("motion_status", "Motion Status", "mdi:motion-sensor"),
+        ("vloss_status", "Video Loss Status", "mdi:video-off"),
+        ("sensor_status", "Sensor Status", "mdi:alarm-light"),
+    ):
+        sensors.append(TigersecuStatusSensor(dvr, key, name, icon))
+
+    # Disk Scheme Sensor
+    sensors.append(TigersecuDiskSchemeSensor(dvr))
+
+    # Disk and SMART Sensors
+    for disk_id in dvr.coordinator.data.get("disks", {}):
+        sensors.append(DiskSensor(dvr, disk_id, "model", "Model", "mdi:harddisk"))
+        sensors.append(DiskSensor(dvr, disk_id, "status", "Status", "mdi:list-status"))
+        sensors.append(
+            DiskSensor(dvr, disk_id, "capacity_gb", "Capacity", "mdi:database", "GB")
+        )
+        sensors.append(
+            DiskSensor(
+                dvr, disk_id, "available_gb", "Available", "mdi:database-check", "GB"
+            )
+        )
+
+        for attr_id in dvr.coordinator.data["disks"][disk_id].get(
+            "smart_attributes", {}
+        ):
+            sensors.append(SmartAttributeSensor(dvr, disk_id, attr_id))
+
+    async_add_entities(sensors)

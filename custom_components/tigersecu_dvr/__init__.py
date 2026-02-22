@@ -4,19 +4,19 @@ import ssl
 import time
 from datetime import timedelta
 
-from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
-
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
-from .pytigersecu import AuthenticationError, TigersecuDVRAPI
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+
 from .const import (
     CONF_RTSP_TIMEOUT,
     DEFAULT_RTSP_TIMEOUT,
 )
+from .pytigersecu import AuthenticationError, TigersecuDVRAPI
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     # Wait for the initial data (like camera channels) to be populated
     try:
         await asyncio.wait_for(dvr.initial_data_received.wait(), timeout=30)
-    except asyncio.TimeoutError as err:
+    except TimeoutError as err:
         raise ConfigEntryNotReady(
             "Did not receive initial channel data from DVR in time"
         ) from err
@@ -152,6 +152,9 @@ class TigersecuDVR:
             "system": {"time_sync_problem": False},
             "last_login": None,
             "update_progress": None,
+            "motion_status": None,
+            "vloss_status": None,
+            "sensor_status": None,
         }
 
         self.api = TigersecuDVRAPI(
@@ -167,7 +170,7 @@ class TigersecuDVR:
     def _read_cert(self):
         """Read the certificate file."""
         try:
-            with open(self.cert_path, "r", encoding="utf-8") as f:
+            with open(self.cert_path, encoding="utf-8") as f:
                 return f.read()
         except FileNotFoundError:
             return None
@@ -201,15 +204,14 @@ class TigersecuDVR:
                 raise ConfigEntryNotReady(
                     f"Certificate validation failed for {self.host}. The stored certificate is invalid."
                 ) from err
-            else:
-                # This would be an SSL error on the initial connection when no cert is stored.
-                _LOGGER.error(
-                    "An unexpected SSL error occurred during initial connection: %s",
-                    err,
-                )
-                raise ConfigEntryNotReady(
-                    f"SSL error during connection to {self.host}"
-                ) from err
+            # This would be an SSL error on the initial connection when no cert is stored.
+            _LOGGER.error(
+                "An unexpected SSL error occurred during initial connection: %s",
+                err,
+            )
+            raise ConfigEntryNotReady(
+                f"SSL error during connection to {self.host}"
+            ) from err
 
         if info:
             self.firmware_version = info.get("version")
@@ -227,7 +229,7 @@ class TigersecuDVR:
             with open(self.cert_path, "w", encoding="utf-8") as f:
                 f.write(pem_cert)
             _LOGGER.info("Certificate saved to %s", self.cert_path)
-        except IOError as e:
+        except OSError as e:
             _LOGGER.error("Failed to save DVR certificate: %s", e)
 
     async def _handle_cert_received(self, pem_cert: str):
@@ -305,6 +307,11 @@ class TigersecuDVR:
                 channel_data["format"] = data.get("Format")
                 updated = True
 
+        elif event_type == "motion_status":
+            if current_data["motion_status"] != trigger_data.get("status"):
+                current_data["motion_status"] = trigger_data.get("status")
+                updated = True
+
         elif event_type == "motion":
             channel_id = trigger_data.get("channel")
             state = trigger_data.get("state")
@@ -320,6 +327,11 @@ class TigersecuDVR:
 
             if current_data["channels"][channel_id]["motion_detected"] != state:
                 current_data["channels"][channel_id]["motion_detected"] = state
+                updated = True
+
+        elif event_type == "vloss_status":
+            if current_data["vloss_status"] != trigger_data.get("status"):
+                current_data["vloss_status"] = trigger_data.get("status")
                 updated = True
 
         elif event_type == "vloss":
@@ -409,6 +421,11 @@ class TigersecuDVR:
                 }
             updated = True
 
+        elif event_type == "sensor_status":
+            if current_data["sensor_status"] != trigger_data.get("status"):
+                current_data["sensor_status"] = trigger_data.get("status")
+                updated = True
+
         elif event_type == "sensor":
             sensor_id = trigger_data.get("sensor_id")
             state = trigger_data.get("state")
@@ -426,6 +443,11 @@ class TigersecuDVR:
                 self._async_add_binary_sensors([new_sensor])
                 self._created_sensor_ids.add(sensor_id)
                 # Initialize state
+                if (
+                    self.coordinator.data.get("sensors") is None
+                ):  # Check if "sensors" key exists
+                    self.coordinator.data["sensors"] = {}  # Create it if it doesn't
+
                 current_data["sensors"][sensor_id] = not state
 
             if current_data["sensors"].get(sensor_id) != state:
